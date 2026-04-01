@@ -36,7 +36,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = SECRET_KEY
 
 # Configure expiration time for JWT tokens
-# 30 minutes
+# 60 minutes
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = relativedelta(minutes=60)
 # 7 days
 # app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)

@@ -2,6 +2,7 @@ import os
 import platform
 import configparser
 from pathlib import Path
+from urllib.parse import quote_plus
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -82,8 +83,20 @@ CLERK_PUBLIC_KEY = get_config("Clerk", "clerk_public_key", "CLERK_PUBLIC_KEY")
 # -----------------------------
 # SQLAlchemy URL Builder
 # -----------------------------
+# def make_url(user, pwd, host, db):
+#     return f"mssql+pyodbc://{user}:{pwd}@{host}/{db}?driver=ODBC+Driver+18+for+SQL+Server"
+
 def make_url(user, pwd, host, db):
-    return f"mssql+pyodbc://{user}:{pwd}@{host}/{db}?driver=ODBC+Driver+17+for+SQL+Server"
+    params = quote_plus(
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        f"SERVER={host};"
+        f"DATABASE={db};"
+        f"UID={user};"
+        f"PWD={pwd};"
+        "TrustServerCertificate=yes;"
+    )
+
+    return f"mssql+pyodbc:///?odbc_connect={params}"
 
 
 # -----------------------------
