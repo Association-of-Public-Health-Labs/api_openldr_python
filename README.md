@@ -531,6 +531,8 @@ Set at least:
 - `Schemas.cdr_schema`
 - `Clerk.clerk_webhook_secret`, `Clerk.secret_key`, `Clerk.api_endpoint`, `Clerk.clerk_jwts_url`, `Clerk.clerk_issuer`, `Clerk.clerk_public_key`
 
+For a named SQL Server instance, `Domains.cdr` can include the instance name, for example `disamoz.org.mz\SQLEXPRESS` or `CDR\SQLEXPRESS`.
+
 ### Linux configuration (environment variables)
 
 On Linux, `configs/paths.py` reads environment variables.
@@ -543,10 +545,18 @@ Common variables:
 - `SCHEMA_CDR`
 - `CLERK_WEBHOOK_SECRET_KEY`, `CLERK_SECRET_KEY`, `CLERK_API_URL`, `CLERK_JWTS_URL`, `CLERK_ISSUER`, `CLERK_PUBLIC_KEY`
 
+For Coolify/Docker deployments that use the CDR SQL Server named instance, set `CDR_DOMAIN` to `disamoz.org.mz\SQLEXPRESS` when connecting from outside the server network, or `CDR\SQLEXPRESS` when the container can resolve the internal host. If SQLEXPRESS is configured with a fixed TCP port, use `host,port` instead, for example `disamoz.org.mz,14330`, and do not include `\SQLEXPRESS`.
+
 ### Database/driver notes
 
 - SQL Server is required for normal operation.
-- Connection strings use `ODBC Driver 18 for SQL Server`.
+- Connection strings use `ODBC Driver 18 for SQL Server` through an explicit `odbc_connect` string.
+- ODBC encryption is enabled with `Encrypt=yes` and `TrustServerCertificate=yes`.
+- MARS is disabled with `MARS_Connection=No`.
+- The application name sent to SQL Server is `OpenLDR API`.
+- ODBC pooling is not disabled by default. For diagnostics only, set `SQL_ODBC_POOLING=false` to add `Pooling=No` to the ODBC connection string.
+- SQLAlchemy pooling stays enabled by default with `pool_pre_ping=True`, `pool_recycle=1800`, and a command timeout from `SQL_QUERY_TIMEOUT` (default `180`). For diagnostics only, set `SQLALCHEMY_DISABLE_POOLING=true` to use `NullPool`.
+- Test the active CDR bind with `python scripts/check_mssql_connection.py`. The script prints `@@SERVERNAME`, `@@SERVICENAME`, and `DB_NAME()` without printing credentials.
 - Confirm network access to the configured SQL Server hosts.
 
 ## Testing

@@ -81,21 +81,54 @@ CLERK_PUBLIC_KEY = get_config("Clerk", "clerk_public_key", "CLERK_PUBLIC_KEY")
 
 
 # -----------------------------
+# SQL Server / ODBC
+# -----------------------------
+SQL_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
+SQL_ODBC_POOLING = os.getenv("SQL_ODBC_POOLING", "true").strip().lower()
+
+
+def build_odbc_connection_string(user, pwd, host, db):
+    options = [
+        f"DRIVER={{{SQL_ODBC_DRIVER}}}",
+        f"SERVER={host}",
+        f"DATABASE={db}",
+        f"UID={user}",
+        f"PWD={pwd}",
+        "Encrypt=yes",
+        "TrustServerCertificate=yes",
+        "Connection Timeout=30",
+        "MARS_Connection=No",
+        "APP=OpenLDR API",
+    ]
+
+    if SQL_ODBC_POOLING in {"0", "false", "no", "off"}:
+        options.append("Pooling=No")
+
+    return ";".join(options) + ";"
+
+
+SQL_CONNECTION_OPTIONS = {
+    "driver": SQL_ODBC_DRIVER,
+    "Encrypt": "yes",
+    "TrustServerCertificate": "yes",
+    "Connection Timeout": "30",
+    "MARS_Connection": "No",
+    "APP": "OpenLDR API",
+    "Pooling": "No" if SQL_ODBC_POOLING in {"0", "false", "no", "off"} else "Default",
+}
+
+
+# -----------------------------
 # SQLAlchemy URL Builder
 # -----------------------------
-def make_url(user, pwd, host, db): 
+def make_url(user, pwd, host, db):
+    connection_string = build_odbc_connection_string(user, pwd, host, db)
+
+    print(f"Connection string for {db}: {connection_string}")  # Debugging line
+
     return URL.create(
         "mssql+pyodbc",
-        username=user,
-        password=pwd,
-        host=host,
-        database=db,
-        query={
-            "driver": "ODBC Driver 18 for SQL Server",
-            "Encrypt": "yes",
-            "TrustServerCertificate": "yes",
-            "Connection Timeout": "30",
-        }
+        query={"odbc_connect": connection_string},
     )
 
 

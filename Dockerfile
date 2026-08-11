@@ -45,4 +45,8 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "3", "--timeout", "120", "app:app"]
+CMD gunicorn --bind 0.0.0.0:5000 \
+    --workers "${GUNICORN_WORKERS:-3}" \
+    --timeout "${GUNICORN_TIMEOUT:-300}" \
+    --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-60}" \
+    app:app
