@@ -17,6 +17,7 @@ from hiv.vl.routes import vl_routes
 from hiv.eid.routes import eid_routes
 from dict.routes import dict_routes
 from tb.gxpert.routes import tb_gxpert_routes
+from tb.cultura.routes import tb_cultura_routes
 from auth.routes import authentication_routes
 from db.database import db
 from configs.paths import *  # Import all constants from paths module
@@ -72,6 +73,7 @@ authentication_routes(api)  # Import and register authentication routes
 vl_routes(api)
 eid_routes(api)
 tb_gxpert_routes(api)
+tb_cultura_routes(api)
 
 
 # Define a route to redirect the root URL to the Swagger UI
