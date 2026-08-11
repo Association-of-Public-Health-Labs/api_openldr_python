@@ -178,5 +178,5 @@ def root():
 
 # Run the application if this script is executed directly
 if __name__ == "__main__":
-    app.run(debug=True) # Run the application in debug mode
-    # app.run() # Run the application in production mode
+    # app.run(debug=True) # Run the application in debug mode
+    app.run() # Run the application in production mode
