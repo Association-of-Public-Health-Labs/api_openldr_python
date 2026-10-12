@@ -50,7 +50,8 @@ class JwksCache:
     The key set is fetched lazily. An unknown ``kid`` triggers a refetch,
     but at most once per ``min_refresh_interval`` seconds so that a flood of
     tokens with random key ids cannot hammer the JWKS endpoint. A failed
-    fetch keeps the previously cached keys.
+    fetch, an empty key list or a list with no usable keys keeps the
+    previously cached keys.
     """
 
     def __init__(
@@ -100,6 +101,9 @@ class JwksCache:
                     keys[kid] = RSAAlgorithm.from_jwk(json.dumps(jwk))
             except Exception as exc:
                 logger.warning("Skipping unusable JWK %r: %s", kid, exc)
+        if not entries and self._keys:
+            logger.warning("Clerk JWKS returned an empty key list; keeping cached keys")
+            return
         if entries and not keys:
             logger.error("Clerk JWKS contained no usable keys; keeping cached keys")
             return

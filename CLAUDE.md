@@ -174,6 +174,16 @@ Key query builder helpers used across all modules:
   token `iat`); a large or negative value means the host clock is off
   (`w32tm /query /status`).
 - On Windows the authorized-parties key is `[Clerk] clerk_authorized_parties` in `configs/configs.ini`.
+- HS256 API tokens are rejected outright if the effective secret
+  (`JWT_SECRET_KEY`, else `SECRET_KEY` from `FLASK_SECRET_KEY` /
+  `[Flask] secret_key`) is unset, the default `"default-secret-key"`, or shorter
+  than 32 bytes.
+- API tokens come **only** from `POST /auth/login`. `POST /auth/clerk` is the
+  Clerk webhook: every request must carry a valid Svix signature
+  (`utilities/webhook_verification.py`, 5 min timestamp tolerance) and it never
+  returns a token. `CLERK_WEBHOOK_SECRET_KEY` (`[Clerk] clerk_webhook_secret` on
+  Windows) must equal the signing secret (`whsec_...`) of the Clerk webhook
+  endpoint, otherwise the webhook rejects everything with 401.
 - Role-based access: Admin and User roles (`utilities/auth_helpers.py`).
 
 ## Running Locally
@@ -295,7 +305,7 @@ Request flow: `HTTP → routes.py → controller (reqparse) → service (SQLAlch
 ### Authentication
 
 - JWT tokens via `flask-jwt-extended`, 60-minute expiration
-- Tokens obtained via `POST /auth/login`
+- Tokens obtained only via `POST /auth/login` (the `/auth/clerk` webhook never returns tokens)
 - Role-based access: `Admin` role has elevated privileges in some endpoints
 - Verified token claims are mapped to `session['user_info']` by `get_user_token_info()` in `authenticate_request()`; see the Authentication section above.
 

@@ -12,6 +12,9 @@ from unittest.mock import patch
 import jwt
 import pytest
 
+from configs import paths
+from tests.test_token_verification import ISSUER, TB_ORIGIN, make_clerk_token, make_jwks
+from utilities import token_verification as tv
 from utilities.utils import get_token
 
 UNAUTHORIZED_BODY = {
@@ -90,3 +93,36 @@ def test_rejected_requests_return_fixed_401_body(client, url, service, result, h
 def test_get_token_parses_authorization_header(header, expected):
     headers = {} if header is None else {"Authorization": header}
     assert get_token(SimpleNamespace(headers=headers)) == expected
+
+
+# --- Clerk (RS256) session tokens at endpoint level -------------------------
+
+CLERK_ENDPOINTS = [ENDPOINTS[0], ENDPOINTS[3]]  # one VL, one TB
+
+
+@pytest.fixture
+def clerk_config(monkeypatch):
+    monkeypatch.setattr(paths, "CLERK_ISSUER", ISSUER)
+    monkeypatch.setattr(paths, "CLERK_AUTHORIZED_PARTIES", TB_ORIGIN)
+    monkeypatch.setattr(tv, "_clerk_jwks", tv.JwksCache(make_jwks))
+
+
+@pytest.mark.parametrize("url,service,result", CLERK_ENDPOINTS)
+def test_valid_clerk_token_is_accepted(client, clerk_config, url, service, result):
+    token = make_clerk_token(sub="user_clerk_42")
+    with patch(service, return_value=result) as service_mock:
+        response = client.get(url, headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    service_mock.assert_called_once()
+    req_args = service_mock.call_args.args[0]
+    assert req_args["user_id"] == "user_clerk_42"
+
+
+@pytest.mark.parametrize("url,service,result", CLERK_ENDPOINTS)
+def test_clerk_token_from_unauthorized_party_rejected(client, clerk_config, url, service, result):
+    token = make_clerk_token(azp="https://evil.example")
+    with patch(service, return_value=result) as service_mock:
+        response = client.get(url, headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+    assert response.get_json() == UNAUTHORIZED_BODY
+    service_mock.assert_not_called()

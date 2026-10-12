@@ -325,3 +325,36 @@ def test_strong_api_secret_accepts_api_tokens(app, jwt_secrets):
 def test_strong_flask_secret_fallback_accepts_api_tokens(app, jwt_secrets):
     jwt_secrets(None, STRONG_SECRET)
     assert _verify(app, _api_token(app))["user_id"] == "u1"
+
+
+# --- JWKS refresh hardening -------------------------------------------------
+
+def test_empty_key_list_does_not_replace_cached_keys(monkeypatch):
+    clock = FakeClock()
+    responses = [make_jwks(), {"keys": []}]
+
+    def fetch():
+        return responses.pop(0) if len(responses) > 1 else responses[0]
+
+    cache = tv.JwksCache(fetch, min_refresh_interval=60, clock=clock)
+    monkeypatch.setattr(paths, "CLERK_ISSUER", ISSUER)
+    monkeypatch.setattr(paths, "CLERK_AUTHORIZED_PARTIES", None)
+    monkeypatch.setattr(tv, "_clerk_jwks", cache)
+
+    assert tv.verify_bearer_token(make_clerk_token())["sub"] == "user_abc"
+    clock.now += 61
+    assert cache.get_key("rotated-kid") is None  # triggers refresh -> empty list
+    assert tv.verify_bearer_token(make_clerk_token())["sub"] == "user_abc"
+
+
+def test_empty_jwks_url_fails_closed_with_real_fetcher(monkeypatch):
+    def no_network(*args, **kwargs):
+        raise AssertionError("must not fetch when CLERK_JWTS_URL is empty")
+
+    monkeypatch.setattr(paths, "CLERK_ISSUER", ISSUER)
+    monkeypatch.setattr(paths, "CLERK_AUTHORIZED_PARTIES", None)
+    monkeypatch.setattr(paths, "CLERK_JWTS_URL", "")
+    monkeypatch.setattr(tv.requests, "get", no_network)
+    monkeypatch.setattr(tv, "_clerk_jwks", tv.JwksCache(tv._fetch_clerk_jwks))
+    with pytest.raises(tv.TokenVerificationError):
+        tv.verify_bearer_token(make_clerk_token())
