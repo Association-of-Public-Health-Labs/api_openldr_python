@@ -304,5 +304,8 @@ def lab_code_filters(params, conventional_default):
 
 
 def rejection_lab_code():
-    """Lab code for rejections: characters 7-9 of RequestID, as in Node."""
-    return func.substring(VlData.RequestID, 7, 3)
+    """Lab code for rejections: characters 7-9 of RequestID, as in Node.
+
+    Literal positions: a bound parameter in GROUP BY is rejected by SQL Server.
+    """
+    return func.substring(VlData.RequestID, literal_column("7"), literal_column("3"))
