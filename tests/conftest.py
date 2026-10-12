@@ -42,10 +42,12 @@ def app():
     from hiv.vl.routes import vl_routes
     from hiv.eid.routes import eid_routes
     from tb.gxpert.routes import tb_gxpert_routes
+    from auth.routes import authentication_routes
 
     vl_routes(api)
     eid_routes(api)
     tb_gxpert_routes(api)
+    authentication_routes(api)
 
     with app.app_context():
         db.create_all()
