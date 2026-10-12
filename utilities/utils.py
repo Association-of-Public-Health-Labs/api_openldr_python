@@ -1,6 +1,7 @@
 from sqlalchemy import and_, or_, func, case, text
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from utilities.service_helpers import coerce_interval_dates
 from configs.paths import *
 
 # -----------------------------------------------------------------------------
@@ -1455,19 +1456,14 @@ def PROCESS_COMMON_PARAMS_VL(req_args):
     tuple
         (dates, facilities, facility_type, disaggregation, health_facility)
     """
-    # Date range - default to last 12 months
-    dates = (
-        req_args.get("interval_dates")[0].split(",")
-        if req_args.get("interval_dates") is not None
-        else [twelve_months_ago(), today()]
-    )
+    # Date range: CSV, repeated params or a list; defaults to the last 12 months.
+    dates = coerce_interval_dates(req_args.get("interval_dates"))
 
     # Facility type - default to province
     facility_type = req_args.get("facility_type") or "province"
 
     # Disaggregation - default to False
-    disaggregation_raw = req_args.get("disaggregation")
-    disaggregation = disaggregation_raw == "True" if disaggregation_raw else False
+    disaggregation = str(req_args.get("disaggregation") or "").strip().lower() in {"true", "1", "yes"}
 
     # Health facility
     health_facility = req_args.get("health_facility")
