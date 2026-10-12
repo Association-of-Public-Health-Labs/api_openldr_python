@@ -27,6 +27,7 @@ def app():
         "tb": "sqlite:///:memory:",
         "dict": "sqlite:///:memory:",
         "users": "sqlite:///:memory:",
+        "reportData": "sqlite:///:memory:",
         "ad": "sqlite:///:memory:",
     }
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False

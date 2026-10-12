@@ -1,4 +1,6 @@
 from hiv.vl.controllers.vl_controller_laboratory import (
+    VlWeeklyReport,
+    VlWeeklyReportNational,
     VlRegisteredSamples,
     VlRegisteredSamplesByMonth,
     VlTestedSamples,
@@ -84,6 +86,10 @@ def vl_routes(api):
     api.add_resource(VlTatByMonth, "/hiv/vl/laboratories/tat_by_month/")
     # Legacy: GET /suppression
     api.add_resource(VlSuppression, "/hiv/vl/laboratories/suppression/")
+    # Legacy: GET /lab_weekly_report
+    api.add_resource(VlWeeklyReport, "/hiv/vl/laboratories/weekly_report/")
+    # Legacy: GET /lab_weekly_report_national
+    api.add_resource(VlWeeklyReportNational, "/hiv/vl/laboratories/weekly_report_national/")
 
     # Facility Endpoints
     # Legacy: GET /clinic_registered_samples_by_facility

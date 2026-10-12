@@ -1,5 +1,9 @@
 from flask_restful import Resource
 
+from hiv.vl.services.vl_services_weekly import (
+    weekly_report_service,
+    weekly_report_national_service,
+)
 from hiv.vl.services.vl_services_laboratory import (
     registered_samples_service,
     registered_samples_by_month_service,
@@ -412,3 +416,55 @@ class VlSuppression(Resource):
                 description: An Error Occurred
         """
         return _endpoint(suppression_service)
+
+
+class VlWeeklyReport(Resource):
+    def get(self):
+        """
+        Retrieve the weekly lab report (one row per lab and week)
+        ---
+        tags:
+            - HIV Viral Load/Laboratories
+        description: >
+            Read from ReportData.Resume. Filters on the week's start date, both
+            ends inclusive. Default window: the current Sunday-Saturday week.
+        parameters:
+            - $ref: '#/parameters/IntervalDates'
+            - $ref: '#/parameters/LabCodeParameter'
+        responses:
+            200:
+                description: lab_code, lab_name, week, start, end, backlogs, tests, registrations, rejections, capacity, tat
+            400:
+                description: Invalid interval_dates
+            401:
+                description: Missing or invalid JWT token
+            500:
+                description: An Error Occurred
+        """
+        return _endpoint(weekly_report_service)
+
+
+class VlWeeklyReportNational(Resource):
+    def get(self):
+        """
+        Retrieve the national weekly report (one row per week)
+        ---
+        tags:
+            - HIV Viral Load/Laboratories
+        description: >
+            Read from ReportData.Resume, summed over labs (tat is the mean of
+            the lab TATs). Default window: the last 12 weeks.
+        parameters:
+            - $ref: '#/parameters/IntervalDates'
+            - $ref: '#/parameters/LabCodeParameter'
+        responses:
+            200:
+                description: week, start, end, backlogs, tests, registrations, rejections, capacity, tat
+            400:
+                description: Invalid interval_dates
+            401:
+                description: Missing or invalid JWT token
+            500:
+                description: An Error Occurred
+        """
+        return _endpoint(weekly_report_national_service)
