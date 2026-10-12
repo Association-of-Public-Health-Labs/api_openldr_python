@@ -163,8 +163,16 @@ Key query builder helpers used across all modules:
 - Anything else → HTTP 401 `{"status": "error", "code": 401, "message": "Invalid or missing token"}`.
   The reason is logged, never returned.
 - If `CLERK_ISSUER` or `CLERK_JWTS_URL` is empty, all Clerk tokens are rejected
-  (fail closed). Before changing Clerk config, run
-  `python -m tools.check_clerk_token < token.txt` with the target config.
+  (fail closed). Before changing Clerk config, check a real dashboard token
+  with the target config (the token lives ~60 s, so run it right after copying;
+  it is never printed):
+  - bash: `python -m tools.check_clerk_token < token.txt`
+  - PowerShell: `python -m tools.check_clerk_token token.txt`
+    (or `Get-Content token.txt | python -m tools.check_clerk_token`)
+
+  The tool also prints a "diagnostic (unverified)" clock offset (host time minus
+  token `iat`); a large or negative value means the host clock is off
+  (`w32tm /query /status`).
 - On Windows the authorized-parties key is `[Clerk] clerk_authorized_parties` in `configs/configs.ini`.
 - Role-based access: Admin and User roles (`utilities/auth_helpers.py`).
 
