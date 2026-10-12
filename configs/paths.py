@@ -130,8 +130,6 @@ SQL_CONNECTION_OPTIONS = {
 def make_url(user, pwd, host, db):
     connection_string = build_odbc_connection_string(user, pwd, host, db)
 
-    print(f"Connection string for {db}: {connection_string}")  # Debugging line
-
     return URL.create(
         "mssql+pyodbc",
         query={"odbc_connect": connection_string},
