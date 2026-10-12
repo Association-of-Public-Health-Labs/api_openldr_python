@@ -29,6 +29,8 @@ from hiv.vl.controllers.vl_controller_facility import (
     VlFacilityTestedSamplesByTestReasonByFacility,
     VlFacilityTestedSamplesPregnant,
     VlFacilityTestedSamplesBreastfeeding,
+    VlFacilityTestedSamplesPregnantByFacility,
+    VlFacilityTestedSamplesBreastfeedingByFacility,
     VlFacilityRejectedSamplesByMonth,
     VlFacilityRejectedSamplesByFacility,
     VlFacilityTatByMonth,
@@ -110,10 +112,13 @@ def vl_routes(api):
     api.add_resource(VlFacilityTestedSamplesByTestReasonByMonth, "/hiv/vl/facilities/tested_samples_by_test_reason_by_month/")
     # Legacy: GET /clinic_samples_by_test_reason_by_facility
     api.add_resource(VlFacilityTestedSamplesByTestReasonByFacility, "/hiv/vl/facilities/tested_samples_by_test_reason_by_facility/")
-    # Legacy: GET /clinic_tests_by_pregnancy
+    # Monthly series (no legacy route; Node's monthly versions were dead code)
     api.add_resource(VlFacilityTestedSamplesPregnant, "/hiv/vl/facilities/tested_samples_pregnant/")
-    # Legacy: GET /clinic_tests_by_breastfeeding
     api.add_resource(VlFacilityTestedSamplesBreastfeeding, "/hiv/vl/facilities/tested_samples_breastfeeding/")
+    # Legacy: GET /clinic_tests_by_pregnancy
+    api.add_resource(VlFacilityTestedSamplesPregnantByFacility, "/hiv/vl/facilities/tested_samples_pregnant_by_facility/")
+    # Legacy: GET /clinic_tests_by_breastfeeding
+    api.add_resource(VlFacilityTestedSamplesBreastfeedingByFacility, "/hiv/vl/facilities/tested_samples_breastfeeding_by_facility/")
     # Legacy: GET /clinic_samples_rejected_by_month
     api.add_resource(VlFacilityRejectedSamplesByMonth, "/hiv/vl/facilities/rejected_samples_by_month/")
     # Legacy: GET /clinic_samples_rejected_by_facility

@@ -556,3 +556,41 @@ def facility_tat_by_facility_service(req_args):
         ]
     except Exception as e:
         return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 16/17. pregnant and breastfeeding women, per location
+#        (legacy /clinic_tests_by_pregnancy, /clinic_tests_by_breastfeeding)
+# ---------------------------------------------------------------------------
+def _special_population_by_facility(req_args, population_filter):
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
+    filters = [
+        date_between(VlData.AnalysisDateTime, params.dates),
+        population_filter,
+        *requesting_location_filters(params),
+    ]
+    try:
+        data = _by_group(params, filters, TOTAL_ALL, *_suppression_entities())
+        return [
+            dict(
+                requesting_facility=row.requesting_facility,
+                total=row.total, suppressed=row.suppressed,
+                not_suppressed=row.not_suppressed, **_window(params),
+            )
+            for row in data
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+def facility_tested_samples_pregnant_by_facility_service(req_args):
+    """Tested samples for pregnant women per location."""
+    return _special_population_by_facility(req_args, pregnant_filter())
+
+
+def facility_tested_samples_breastfeeding_by_facility_service(req_args):
+    """Tested samples for breastfeeding women per location."""
+    return _special_population_by_facility(req_args, breastfeeding_filter())

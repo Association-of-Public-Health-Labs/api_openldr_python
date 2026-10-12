@@ -12,6 +12,8 @@ from hiv.vl.services.vl_services_facilities import (
     facility_tested_samples_by_test_reason_by_facility_service,
     facility_tested_samples_pregnant_service,
     facility_tested_samples_breastfeeding_service,
+    facility_tested_samples_pregnant_by_facility_service,
+    facility_tested_samples_breastfeeding_by_facility_service,
     facility_rejected_samples_by_month_service,
     facility_rejected_samples_by_facility_service,
     facility_tat_by_month_service,
@@ -438,3 +440,63 @@ class VlFacilityTatByFacility(Resource):
                 description: An Error Occurred
         """
         return _endpoint(facility_tat_by_facility_service)
+
+
+class VlFacilityTestedSamplesPregnantByFacility(Resource):
+    def get(self):
+        """
+        Retrieve tested samples for pregnant women per location
+        ---
+        tags:
+            - HIV Viral Load/Facilities
+        description: >
+            Pregnant in YES/Yes/yes/Sim/SIM/sim. Grouped by the facility_type /
+            disaggregation column, like the other *_by_facility endpoints.
+        parameters:
+            - $ref: '#/parameters/IntervalDates'
+            - $ref: '#/parameters/ProvinceParameter'
+            - $ref: '#/parameters/DistrictParameter'
+            - $ref: '#/parameters/HealthFacilityParameter'
+            - $ref: '#/parameters/FacilityType'
+            - $ref: '#/parameters/DisaggregationParameter'
+        responses:
+            200:
+                description: requesting_facility, total, suppressed, not_suppressed
+            401:
+                description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
+            500:
+                description: An Error Occurred
+        """
+        return _endpoint(facility_tested_samples_pregnant_by_facility_service)
+
+
+class VlFacilityTestedSamplesBreastfeedingByFacility(Resource):
+    def get(self):
+        """
+        Retrieve tested samples for breastfeeding women per location
+        ---
+        tags:
+            - HIV Viral Load/Facilities
+        description: >
+            BreastFeeding in YES/Yes/yes/Sim/SIM/sim. Grouped by the
+            facility_type / disaggregation column.
+        parameters:
+            - $ref: '#/parameters/IntervalDates'
+            - $ref: '#/parameters/ProvinceParameter'
+            - $ref: '#/parameters/DistrictParameter'
+            - $ref: '#/parameters/HealthFacilityParameter'
+            - $ref: '#/parameters/FacilityType'
+            - $ref: '#/parameters/DisaggregationParameter'
+        responses:
+            200:
+                description: requesting_facility, total, suppressed, not_suppressed
+            401:
+                description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
+            500:
+                description: An Error Occurred
+        """
+        return _endpoint(facility_tested_samples_breastfeeding_by_facility_service)

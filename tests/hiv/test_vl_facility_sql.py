@@ -118,3 +118,31 @@ def test_role_is_not_looked_up_above_facility_level(app):
     with patch.object(fac, "_get_user_role") as lookup:
         sql_for(app, fac.facility_tested_samples_by_facility_service)
     lookup.assert_not_called()
+
+
+def test_pregnant_by_facility(app):
+    sql = sql_for(app, fac.facility_tested_samples_pregnant_by_facility_service)
+    assert f"[VlData].[Pregnant] {YES_LIST}" in sql
+    assert "GROUP BY [VlData].[RequestingProvinceName]" in sql
+    assert NOT_NULL_TEXT in sql
+    assert "AS suppressed" in sql and "AS not_suppressed" in sql
+
+
+def test_breastfeeding_by_facility_drills_down(app):
+    sql = sql_for(
+        app, fac.facility_tested_samples_breastfeeding_by_facility_service,
+        {"facility_type": "district", "district": ["Chibuto"], "disaggregation": "true"},
+    )
+    assert f"[VlData].[BreastFeeding] {YES_LIST}" in sql
+    assert "[VlData].[RequestingDistrictName] IN ('Chibuto')" in sql
+    assert "GROUP BY [VlData].[RequestingFacilityName]" in sql
+
+
+def test_new_facility_routes(client, auth_headers):
+    for path, name in [
+        ("tested_samples_pregnant_by_facility", "facility_tested_samples_pregnant_by_facility_service"),
+        ("tested_samples_breastfeeding_by_facility", "facility_tested_samples_breastfeeding_by_facility_service"),
+    ]:
+        with patch(f"hiv.vl.controllers.vl_controller_facility.{name}", return_value=[]):
+            response = client.get(f"/hiv/vl/facilities/{path}/", headers=auth_headers)
+        assert response.status_code == 200, path
