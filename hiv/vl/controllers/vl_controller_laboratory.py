@@ -97,6 +97,7 @@ class VlTestedSamples(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Tested samples by laboratory
@@ -122,6 +123,7 @@ class VlTestedSamplesByMonth(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Tested samples by month
@@ -297,9 +299,10 @@ class VlRejectedSamples(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
-                description: Rejected samples by laboratory
+                description: Rejected samples per lab code: lab_code, testing_facility (dictionary LabName), total
             401:
                 description: Missing or invalid JWT token
             500:
@@ -322,6 +325,7 @@ class VlRejectedSamplesByMonth(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Rejected samples by month
@@ -347,6 +351,7 @@ class VlTatByLab(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Turnaround time by laboratory
@@ -372,6 +377,7 @@ class VlTatByMonth(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Turnaround time by month

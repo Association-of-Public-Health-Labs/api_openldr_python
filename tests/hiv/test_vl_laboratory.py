@@ -84,7 +84,7 @@ VL_LAB_ENDPOINTS = [
     (
         "/hiv/vl/laboratories/rejected_samples/",
         "rejected_samples_service",
-        [{"testing_facility": "Lab A", "total": 15}],
+        [{"lab_code": "PCD", "testing_facility": "Cabo Delgado", "total": 3}],
     ),
     (
         "/hiv/vl/laboratories/rejected_samples_by_month/",
