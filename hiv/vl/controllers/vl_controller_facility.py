@@ -52,6 +52,8 @@ class VlFacilityRegisteredSamples(Resource):
                 description: Registered samples by requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -77,6 +79,8 @@ class VlFacilityTestedSamplesByMonth(Resource):
                 description: Tested samples by month (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -102,6 +106,8 @@ class VlFacilityTestedSamplesByFacility(Resource):
                 description: Tested samples by requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -127,6 +133,8 @@ class VlFacilityTestedSamplesByGenderByMonth(Resource):
                 description: Tested samples by gender (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -152,6 +160,8 @@ class VlFacilityTestedSamplesByGenderByFacility(Resource):
                 description: Tested samples by gender and requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -172,11 +182,14 @@ class VlFacilityTestedSamplesByAgeByMonth(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/AgeRangeParameter'
         responses:
             200:
                 description: Tested samples by age group (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -197,11 +210,14 @@ class VlFacilityTestedSamplesByAgeByFacility(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/AgeRangeParameter'
         responses:
             200:
                 description: Tested samples by age group and requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -227,6 +243,8 @@ class VlFacilityTestedSamplesByTestReasonByMonth(Resource):
                 description: Tested samples by test reason (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -252,6 +270,8 @@ class VlFacilityTestedSamplesByTestReasonByFacility(Resource):
                 description: Tested samples by test reason (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -277,6 +297,8 @@ class VlFacilityTestedSamplesPregnant(Resource):
                 description: Tested samples for pregnant women (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -302,6 +324,8 @@ class VlFacilityTestedSamplesBreastfeeding(Resource):
                 description: Tested samples for breastfeeding women (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -327,6 +351,8 @@ class VlFacilityRejectedSamplesByMonth(Resource):
                 description: Rejected samples by month (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -352,6 +378,8 @@ class VlFacilityRejectedSamplesByFacility(Resource):
                 description: Rejected samples by requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -377,6 +405,8 @@ class VlFacilityTatByMonth(Resource):
                 description: Turnaround time by month (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -402,6 +432,8 @@ class VlFacilityTatByFacility(Resource):
                 description: Turnaround time by requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """

@@ -1,97 +1,62 @@
-from utilities.utils import (
-    PROCESS_COMMON_PARAMS_VL,
-    YEAR, MONTH, DATE_PART, TOTAL_ALL, TOTAL_NOT_NULL, TOTAL_NULL,
-    SUPPRESSION, GENDER_SUPPRESSION, DATE_DIFF_AVG,
-    and_, or_, func, case, text,
-)
+"""
+HIV VL facility (Província/Distrito/US) services.
+
+Location filters use the Requesting* columns. With no location given, rows
+whose RequestingProvinceName is NULL or the text 'null' are excluded, as in
+Node, except on the two monthly "tested" services (Node has no default
+there). Counting rules come from hiv/vl/services/vl_common.py.
+"""
+from sqlalchemy import and_, case, func
+
 from db.database import db
 from hiv.vl.models.vl import VlData
-from hiv.vl.services.vl_services_patients import get_patients_by_facility_service
-from utilities.auth_helpers import get_user_role as _get_user_role
+from hiv.vl.services.vl_common import (
+    age_range_filters,
+    breastfeeding_filter,
+    date_between,
+    date_between_inclusive,
+    not_suppressed_count,
+    parse_vl_params,
+    pregnant_filter,
+    rejected_condition,
+    requesting_group_column,
+    requesting_location_filters,
+    suppressed_count,
+    tat_averages,
+    tat_filters,
+    test_reason_counts,
+    year_month_columns,
+)
+from utilities.auth_helpers import check_admin_access, get_user_role as _get_user_role
+from utilities.utils import GENDER_SUPPRESSION, TOTAL_ALL, TOTAL_NOT_NULL, TOTAL_NULL
 
 
-def _check_health_facility_access(user_id, user_role, facility_type, req_args):
-    """Return error dict if non-Admin tries to access health_facility level, else None."""
-    if facility_type == "health_facility" and user_role != "Admin":
-        return {
-            "status": "error",
-            "code": 403,
-            "message": f"Forbidden - User with id {user_id} and role {user_role} is not authorized to access this resource.",
-        }
-
-    if facility_type == "health_facility" and user_role == "Admin":
-        return get_patients_by_facility_service(req_args)
-      
-
-def _build_facility_filters(facilities, facility_type):
-    """Build facility filter conditions based on facility_type (Requesting* columns)."""
-    if not facilities:
-        return []
-    if facility_type == "province":
-        return [VlData.RequestingProvinceName.in_(facilities)]
-    elif facility_type == "district":
-        return [VlData.RequestingDistrictName.in_(facilities)]
-    elif facility_type == "health_facility":
-        return [VlData.RequestingFacilityName.in_(facilities)]
-    return []
+def _error(e):
+    return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
 
 
-def _get_group_column(disaggregation, facility_type):
-    """Determine the grouping column based on disaggregation and facility_type."""
-    if disaggregation:
-        if facility_type == "province":
-            return VlData.RequestingDistrictName
-        elif facility_type == "district":
-            return VlData.RequestingFacilityName
-        else:
-            return VlData.RequestingProvinceName
-    else:
-        if facility_type == "province":
-            return VlData.RequestingProvinceName
-        elif facility_type == "district":
-            return VlData.RequestingDistrictName
-        else:
-            return VlData.RequestingFacilityName
-
-
-def _year_month_group_order(date_field):
-    """Return (group_by, order_by) tuples for year/month grouping."""
-    cols = [YEAR(date_field), MONTH(date_field), DATE_PART("month", date_field)]
-    return cols, cols
+def _facility_level_forbidden(req_args, params):
+    """Single-facility aggregates (facility_type=health_facility) are Admin-only."""
+    if params.facility_type != "health_facility":
+        return None
+    user_id, user_role = _get_user_role(req_args)
+    return check_admin_access(user_id, user_role)
 
 
 def _suppression_entities():
-    """Standard suppression with_entities columns."""
-    return [
-        SUPPRESSION(VlData.ViralLoadResultCategory, "Suppressed").label("suppressed"),
-        SUPPRESSION(VlData.ViralLoadResultCategory, "Not Suppressed").label("not_suppressed"),
-    ]
+    return [suppressed_count(), not_suppressed_count()]
 
 
 def _gender_suppression_entities():
-    """Standard gender-stratified suppression columns."""
     return [
-        GENDER_SUPPRESSION(
-            [VlData.ViralLoadResultCategory, VlData.HL7SexCode],
-            ["Suppressed", "M"],
-        ).label("male_suppressed"),
-        GENDER_SUPPRESSION(
-            [VlData.ViralLoadResultCategory, VlData.HL7SexCode],
-            ["Not Suppressed", "M"],
-        ).label("male_not_suppressed"),
-        GENDER_SUPPRESSION(
-            [VlData.ViralLoadResultCategory, VlData.HL7SexCode],
-            ["Suppressed", "F"],
-        ).label("female_suppressed"),
-        GENDER_SUPPRESSION(
-            [VlData.ViralLoadResultCategory, VlData.HL7SexCode],
-            ["Not Suppressed", "F"],
-        ).label("female_not_suppressed"),
+        GENDER_SUPPRESSION([VlData.ViralLoadResultCategory, VlData.HL7SexCode], ["Suppressed", "M"]).label("male_suppressed"),
+        GENDER_SUPPRESSION([VlData.ViralLoadResultCategory, VlData.HL7SexCode], ["Not Suppressed", "M"]).label("male_not_suppressed"),
+        GENDER_SUPPRESSION([VlData.ViralLoadResultCategory, VlData.HL7SexCode], ["Suppressed", "F"]).label("female_suppressed"),
+        GENDER_SUPPRESSION([VlData.ViralLoadResultCategory, VlData.HL7SexCode], ["Not Suppressed", "F"]).label("female_not_suppressed"),
     ]
 
 
 def _totals_entities():
-    """Standard total/not_null/null columns."""
     return [
         TOTAL_ALL,
         TOTAL_NOT_NULL(VlData.ViralLoadResultCategory).label("total_not_null"),
@@ -99,162 +64,140 @@ def _totals_entities():
     ]
 
 
+def _gender_values(row):
+    return dict(
+        male_suppressed=row.male_suppressed,
+        male_not_suppressed=row.male_not_suppressed,
+        female_suppressed=row.female_suppressed,
+        female_not_suppressed=row.female_not_suppressed,
+    )
+
+
+def _tat_values(row):
+    return dict(
+        collection_reception=row.collection_reception,
+        reception_registration=row.reception_registration,
+        registration_analysis=row.registration_analysis,
+        analysis_validation=row.analysis_validation,
+    )
+
+
+def _window(params):
+    return dict(start_date=params.dates[0], end_date=params.dates[1])
+
+
+def _age_group():
+    return case(
+        (VlData.AgeInYears.between(0, 14), "0-14"),
+        (VlData.AgeInYears.between(15, 19), "15-19"),
+        (VlData.AgeInYears.between(20, 24), "20-24"),
+        (VlData.AgeInYears.between(25, 29), "25-29"),
+        (VlData.AgeInYears.between(30, 34), "30-34"),
+        (VlData.AgeInYears.between(35, 39), "35-39"),
+        (VlData.AgeInYears.between(40, 44), "40-44"),
+        (VlData.AgeInYears.between(45, 49), "45-49"),
+        (VlData.AgeInYears >= 50, "50+"),
+        else_="Unknown",
+    ).label("age_group")
+
+
+def _by_group(params, filters, *entities):
+    group_col = requesting_group_column(params)
+    return (
+        VlData.query.with_entities(group_col.label("requesting_facility"), *entities)
+        .filter(and_(*filters))
+        .group_by(group_col)
+        .order_by(group_col)
+        .all()
+    )
+
+
+def _by_month(month_cols, filters, *entities):
+    return (
+        VlData.query.with_entities(*month_cols, *entities)
+        .filter(and_(*filters))
+        .group_by(*month_cols)
+        .order_by(month_cols[0], month_cols[1])
+        .all()
+    )
+
+
 # ---------------------------------------------------------------------------
-# 1. facility_registered_samples_service
+# 1. facility_registered_samples_service   (legacy /clinic_registered_samples_by_facility)
 # ---------------------------------------------------------------------------
 def facility_registered_samples_service(req_args):
-    """Registered samples grouped by year/month with suppression and gender splits (facility)."""
-    
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-
-    if access_error:
-        return access_error
-
+    """Registered samples per location (registration date)."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
     filters = [
-        VlData.RegisteredDateTime.between(dates[0], dates[1]),
-        VlData.RegisteredDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.RegisteredDateTime, params.dates),
+        *requesting_location_filters(params),
     ]
-
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_col = _get_group_column(disaggregation, facility_type)
-
     try:
-        query = (
-            VlData.query.with_entities(
-                group_col.label("requesting_facility"),
-                *_suppression_entities(),
-                *_gender_suppression_entities(),
-                *_totals_entities(),
-            )
-            .filter(and_(*filters))
-            .group_by(group_col)
-            .order_by(group_col)
-        )
-
-        # print(query.statement.compile(compile_kwargs={"literal_binds": True}))
-
-        data = query.all()
-
+        data = _by_group(params, filters, *_suppression_entities(),
+                         *_gender_suppression_entities(), *_totals_entities())
         return [
             dict(
                 requesting_facility=row.requesting_facility,
                 total=row.total, total_not_null=row.total_not_null,
                 total_null=row.total_null, suppressed=row.suppressed,
                 not_suppressed=row.not_suppressed,
-                male_suppressed=row.male_suppressed,
-                male_not_suppressed=row.male_not_suppressed,
-                female_suppressed=row.female_suppressed,
-                female_not_suppressed=row.female_not_suppressed,
-                start_date=dates[0],
-                end_date=dates[1],
+                **_gender_values(row), **_window(params),
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 2. facility_tested_samples_by_month_service
+# 2. facility_tested_samples_by_month_service   (legacy /clinic_samples_tested_by_month)
 # ---------------------------------------------------------------------------
 def facility_tested_samples_by_month_service(req_args):
-    """Tested samples grouped by year/month with suppression and gender splits (facility)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-
-    if access_error:
-        return access_error
-
+    """Tested samples per month (no 'null' province default, as in Node)."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
+    month_cols = year_month_columns(VlData.AnalysisDateTime)
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *requesting_location_filters(params, exclude_null_province=False),
     ]
-
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
     try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                *_suppression_entities(),
-                *_gender_suppression_entities(),
-                *_totals_entities(),
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
+        data = _by_month(month_cols, filters, *_suppression_entities(),
+                         *_gender_suppression_entities(), *_totals_entities())
         return [
             dict(
-                year=row.year, month=row[1], month_name=row[2],
+                year=row.year, month=row.month, month_name=row.month_name,
                 total=row.total, total_not_null=row.total_not_null,
                 total_null=row.total_null, suppressed=row.suppressed,
                 not_suppressed=row.not_suppressed,
-                male_suppressed=row.male_suppressed,
-                male_not_suppressed=row.male_not_suppressed,
-                female_suppressed=row.female_suppressed,
-                female_not_suppressed=row.female_not_suppressed,
-                start_date=dates[0],
-                end_date=dates[1],
+                **_gender_values(row), **_window(params),
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 3. facility_tested_samples_by_facility_service
+# 3. facility_tested_samples_by_facility_service   (legacy /clinic_samples_tested_by_facility)
 # ---------------------------------------------------------------------------
 def facility_tested_samples_by_facility_service(req_args):
-    """Tested samples grouped by RequestingFacilityName (with disaggregation support)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
+    """Tested samples per location (analysis date)."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *requesting_location_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_col = _get_group_column(disaggregation, facility_type)
-
     try:
-        query = (
-            VlData.query.with_entities(
-                group_col.label("requesting_facility"),
-                *_suppression_entities(),
-                *_totals_entities(),
-            )
-            .filter(and_(*filters))
-            .group_by(group_col)
-            .order_by(group_col)
-        )
-        data = query.all()
+        data = _by_group(params, filters, *_suppression_entities(), *_totals_entities())
         return [
             dict(
                 requesting_facility=row.requesting_facility,
@@ -265,690 +208,351 @@ def facility_tested_samples_by_facility_service(req_args):
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 4. facility_tested_samples_by_month_by_gender_service
+# 4. facility_tested_samples_by_month_by_gender_service   (legacy /clinic_samples_tested_by_gender)
 # ---------------------------------------------------------------------------
 def facility_tested_samples_by_month_by_gender_service(req_args):
-    """Tested samples grouped by year/month with gender-stratified suppression (facility)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
+    """Tested samples per month by sex (no 'null' province default, as in Node)."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
+    month_cols = year_month_columns(VlData.AnalysisDateTime)
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *requesting_location_filters(params, exclude_null_province=False),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
     try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                *_gender_suppression_entities(),
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
+        data = _by_month(month_cols, filters, TOTAL_ALL, *_gender_suppression_entities())
         return [
             dict(
-                year=row.year, month=row[1], month_name=row[2],
-                male_suppressed=row.male_suppressed,
-                male_not_suppressed=row.male_not_suppressed,
-                female_suppressed=row.female_suppressed,
-                female_not_suppressed=row.female_not_suppressed,
-                start_date=dates[0],
-                end_date=dates[1],
+                year=row.year, month=row.month, month_name=row.month_name,
+                total=row.total, **_gender_values(row), **_window(params),
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
 # 5. facility_tested_samples_by_gender_by_facility_service
+#    (legacy /clinic_samples_tested_by_gender_and_facility)
 # ---------------------------------------------------------------------------
 def facility_tested_samples_by_gender_by_facility_service(req_args):
-    """Tested samples grouped by year/month and RequestingFacilityName with gender splits."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
+    """Tested samples per location by sex (one row per location)."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *requesting_location_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-    group_col = _get_group_column(disaggregation, facility_type)
-
     try:
-        query = (
-            VlData.query.with_entities(
-                group_col.label("requesting_facility"),
-                *_gender_suppression_entities(),
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols, group_col)
-            .order_by(*order_cols, group_col)
-        )
-        data = query.all()
+        data = _by_group(params, filters, TOTAL_ALL, *_gender_suppression_entities())
         return [
             dict(
                 requesting_facility=row.requesting_facility,
-                male_suppressed=row.male_suppressed,
-                male_not_suppressed=row.male_not_suppressed,
-                female_suppressed=row.female_suppressed,
-                female_not_suppressed=row.female_not_suppressed,
-                start_date=dates[0],
-                end_date=dates[1],
+                total=row.total, **_gender_values(row), **_window(params),
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 6. facility_tested_samples_by_age_service
+# 6. facility_tested_samples_by_age_by_month_service   (legacy /clinic_samples_tested_by_age)
 # ---------------------------------------------------------------------------
 def facility_tested_samples_by_age_by_month_service(req_args):
-    """Tested samples grouped by year/month with age group classification (facility)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
+    """Tested samples per month and age group; optional age_range filter."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *requesting_location_filters(params),
+        *age_range_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    age_case = case(
-        (VlData.AgeInYears.between(0, 14), "0-14"),
-        (VlData.AgeInYears.between(15, 19), "15-19"),
-        (VlData.AgeInYears.between(20, 24), "20-24"),
-        (VlData.AgeInYears.between(25, 29), "25-29"),
-        (VlData.AgeInYears.between(30, 34), "30-34"),
-        (VlData.AgeInYears.between(35, 39), "35-39"),
-        (VlData.AgeInYears.between(40, 44), "40-44"),
-        (VlData.AgeInYears.between(45, 49), "45-49"),
-        (VlData.AgeInYears >= 50, "50+"),
-        else_="Unknown",
-    ).label("age_group")
-
     try:
-        # Use subquery to work around SQL Server parameterized CASE in GROUP BY
+        # Subquery: SQL Server cannot GROUP BY a parameterised CASE directly.
         subq = (
             db.session.query(
-                VlData.AnalysisDateTime,
-                age_case,
+                VlData.AnalysisDateTime.label("analysis"),
+                VlData.ViralLoadResultCategory.label("category"),
+                _age_group(),
             )
             .filter(and_(*filters))
             .subquery()
         )
-        query = (
+        month_cols = year_month_columns(subq.c.analysis)
+        data = (
             db.session.query(
-                func.year(subq.c.AnalysisDateTime).label("year"),
-                func.month(subq.c.AnalysisDateTime),
-                func.datename(text("month"), subq.c.AnalysisDateTime),
+                *month_cols,
                 subq.c.age_group,
                 func.count().label("total"),
+                func.count(case((subq.c.category == "Suppressed", 1), else_=None)).label("suppressed"),
+                func.count(case((subq.c.category == "Not Suppressed", 1), else_=None)).label("not_suppressed"),
             )
-            .group_by(
-                func.year(subq.c.AnalysisDateTime),
-                func.month(subq.c.AnalysisDateTime),
-                func.datename(text("month"), subq.c.AnalysisDateTime),
-                subq.c.age_group,
-            )
-            .order_by(
-                func.year(subq.c.AnalysisDateTime),
-                func.month(subq.c.AnalysisDateTime),
-                subq.c.age_group,
-            )
+            .group_by(*month_cols, subq.c.age_group)
+            .order_by(month_cols[0], month_cols[1], subq.c.age_group)
+            .all()
         )
-        data = query.all()
         return [
             dict(
-                year=row[0], month=row[1], month_name=row[2],
+                year=row.year, month=row.month, month_name=row.month_name,
                 age_group=row.age_group, total=row.total,
-                start_date=dates[0],
-                end_date=dates[1],
+                suppressed=row.suppressed, not_suppressed=row.not_suppressed,
+                **_window(params),
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
 # 7. facility_tested_samples_by_age_by_facility_service
+#    (legacy /clinic_samples_tested_by_age_and_facility)
 # ---------------------------------------------------------------------------
 def facility_tested_samples_by_age_by_facility_service(req_args):
-    """Tested samples grouped by year/month, age group, and RequestingFacilityName."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
+    """Tested samples per location and age group; optional age_range filter.
 
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
+    Node returned one row per location for the selected age range; here
+    the rows are split by age group and the dashboard sums them.
+    """
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
+    group_col = requesting_group_column(params)
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *requesting_location_filters(params),
+        *age_range_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_col = _get_group_column(disaggregation, facility_type)
-
-    age_case = case(
-        (VlData.AgeInYears.between(0, 14), "0-14"),
-        (VlData.AgeInYears.between(15, 19), "15-19"),
-        (VlData.AgeInYears.between(20, 24), "20-24"),
-        (VlData.AgeInYears.between(25, 29), "25-29"),
-        (VlData.AgeInYears.between(30, 34), "30-34"),
-        (VlData.AgeInYears.between(35, 39), "35-39"),
-        (VlData.AgeInYears.between(40, 44), "40-44"),
-        (VlData.AgeInYears.between(45, 49), "45-49"),
-        (VlData.AgeInYears >= 50, "50+"),
-        else_="Unknown",
-    ).label("age_group")
-
     try:
-        # Use subquery to work around SQL Server parameterized CASE in GROUP BY
         subq = (
             db.session.query(
-                # VlData.AnalysisDateTime,
                 group_col.label("requesting_facility"),
-                age_case,
+                VlData.ViralLoadResultCategory.label("category"),
+                _age_group(),
             )
             .filter(and_(*filters))
             .subquery()
         )
-        query = (
+        data = (
             db.session.query(
-                # func.year(subq.c.AnalysisDateTime).label("year"),
-                # func.month(subq.c.AnalysisDateTime),
-                # func.datename(text("month"), subq.c.AnalysisDateTime),
                 subq.c.requesting_facility,
                 subq.c.age_group,
                 func.count().label("total"),
+                func.count(case((subq.c.category == "Suppressed", 1), else_=None)).label("suppressed"),
+                func.count(case((subq.c.category == "Not Suppressed", 1), else_=None)).label("not_suppressed"),
             )
-            .group_by(
-                # func.year(subq.c.AnalysisDateTime),
-                # func.month(subq.c.AnalysisDateTime),
-                # func.datename(text("month"), subq.c.AnalysisDateTime),
-                subq.c.requesting_facility,
-                subq.c.age_group,
-            )
-            .order_by(
-                # func.year(subq.c.AnalysisDateTime),
-                # func.month(subq.c.AnalysisDateTime),
-                subq.c.requesting_facility,
-                subq.c.age_group,
-            )
+            .group_by(subq.c.requesting_facility, subq.c.age_group)
+            .order_by(subq.c.requesting_facility, subq.c.age_group)
+            .all()
         )
-        data = query.all()
         return [
             dict(
-                # year=row[0], month=row[1], month_name=row[2],
                 requesting_facility=row.requesting_facility,
                 age_group=row.age_group, total=row.total,
-                start_date=dates[0],
-                end_date=dates[1],
+                suppressed=row.suppressed, not_suppressed=row.not_suppressed,
+                **_window(params),
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
 # 8. facility_tested_samples_by_test_reason_by_month_service
 # ---------------------------------------------------------------------------
 def facility_tested_samples_by_test_reason_by_month_service(req_args):
-    """Tested samples grouped by year/month with test reason counts (facility)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
+    """Tested samples per month by reason for test."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
+    month_cols = year_month_columns(VlData.AnalysisDateTime)
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *requesting_location_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
     try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                func.count(case((VlData.ReasonForTest == "Routine", 1))).label("routine"),
-                func.count(case((
-                    VlData.ReasonForTest.in_([
-                        "Suspected treatment failure",
-                        "Suspeita de falha terapêutica",
-                    ]), 1
-                ))).label("treatment_failure"),
-                func.count(case((
-                    VlData.ReasonForTest.in_([
-                        "Não preenchido",
-                        "Reason Not Specified",
-                    ]), 1
-                ))).label("reason_not_specified"),
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
+        data = _by_month(month_cols, filters, *test_reason_counts(), TOTAL_ALL)
         return [
             dict(
-                year=row.year, month=row[1], month_name=row[2],
+                year=row.year, month=row.month, month_name=row.month_name,
                 routine=row.routine, treatment_failure=row.treatment_failure,
                 reason_not_specified=row.reason_not_specified, total=row.total,
-                start_date=dates[0],
-                end_date=dates[1],
+                **_window(params),
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
+
 
 # ---------------------------------------------------------------------------
 # 9. facility_tested_samples_by_test_reason_by_facility_service
+#    (legacy /clinic_samples_by_test_reason, summed by the dashboard)
 # ---------------------------------------------------------------------------
 def facility_tested_samples_by_test_reason_by_facility_service(req_args):
-    """Tested samples by test reason grouped by year/month (facility)."""
-
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
-
+    """Tested samples per location by reason for test."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *requesting_location_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_col = _get_group_column(disaggregation, facility_type)
-
     try:
-        query = (
-            VlData.query.with_entities(
-                group_col.label("requesting_facility"),
-                func.count(case((VlData.ReasonForTest == "Routine", 1))).label("routine"),
-                func.count(case((
-                    VlData.ReasonForTest.in_([
-                        "Suspected treatment failure",
-                        "Suspeita de falha terapêutica",
-                    ]), 1
-                ))).label("treatment_failure"),
-                func.count(case((
-                    VlData.ReasonForTest.in_([
-                        "Não preenchido",
-                        "Reason Not Specified",
-                    ]), 1
-                ))).label("reason_not_specified"),
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(group_col)
-            .order_by(group_col)
-        )
-        data = query.all()
+        data = _by_group(params, filters, *test_reason_counts(), TOTAL_ALL)
         return [
             dict(
                 requesting_facility=row.requesting_facility,
                 routine=row.routine, treatment_failure=row.treatment_failure,
                 reason_not_specified=row.reason_not_specified, total=row.total,
-                start_date=dates[0],
-                end_date=dates[1],
+                **_window(params),
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 10. facility_tested_samples_pregnant_service
+# 10/11. pregnant and breastfeeding women, per month
 # ---------------------------------------------------------------------------
+def _special_population_by_month(req_args, population_filter):
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
+    month_cols = year_month_columns(VlData.AnalysisDateTime)
+    filters = [
+        date_between(VlData.AnalysisDateTime, params.dates),
+        population_filter,
+        *requesting_location_filters(params),
+    ]
+    try:
+        data = _by_month(month_cols, filters, *_suppression_entities(), TOTAL_ALL)
+        return [
+            dict(
+                year=row.year, month=row.month, month_name=row.month_name,
+                total=row.total, suppressed=row.suppressed,
+                not_suppressed=row.not_suppressed, **_window(params),
+            )
+            for row in data
+        ]
+    except Exception as e:
+        return _error(e)
+
+
 def facility_tested_samples_pregnant_service(req_args):
-    """Tested samples for pregnant women grouped by year/month (facility)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
-    filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.Pregnant == "Yes",
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
-    try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                *_suppression_entities(),
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
-        return [
-            dict(
-                year=row.year, month=row[1], month_name=row[2],
-                total=row.total, suppressed=row.suppressed,
-                not_suppressed=row.not_suppressed,
-                start_date=dates[0],
-                end_date=dates[1],
-            )
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+    """Tested samples for pregnant women per month."""
+    return _special_population_by_month(req_args, pregnant_filter())
 
 
-# ---------------------------------------------------------------------------
-# 11. facility_tested_samples_breastfeeding_service
-# ---------------------------------------------------------------------------
 def facility_tested_samples_breastfeeding_service(req_args):
-    """Tested samples for breastfeeding women grouped by year/month (facility)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
+    """Tested samples for breastfeeding women per month."""
+    return _special_population_by_month(req_args, breastfeeding_filter())
 
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
 
-    filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.BreastFeeding == "Yes",
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
+# ---------------------------------------------------------------------------
+# 12/13. rejected samples   (legacy /clinic_samples_rejected_by_month, _by_facility)
+# ---------------------------------------------------------------------------
+def _rejection_filters(params):
+    """✱ Either rejection code (Node required both) and an inclusive
+    registration-date window (Node's BETWEEN dropped most of the end day)."""
+    return [
+        rejected_condition(),
+        date_between_inclusive(VlData.RegisteredDateTime, params.dates),
+        *requesting_location_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
-    try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                *_suppression_entities(),
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
-        return [
-            dict(
-                year=row.year, month=row[1], month_name=row[2],
-                total=row.total, suppressed=row.suppressed,
-                not_suppressed=row.not_suppressed,
-                start_date=dates[0],
-                end_date=dates[1],
-            )
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
 
 
-# ---------------------------------------------------------------------------
-# 12. facility_rejected_samples_by_month_service
-# ---------------------------------------------------------------------------
 def facility_rejected_samples_by_month_service(req_args):
-    """Rejected samples grouped by year/month (facility)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
-    filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.LIMSRejectionCode.is_not(None),
-        VlData.LIMSRejectionCode != "",
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
+    """Rejected samples per registration month."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
+    month_cols = year_month_columns(VlData.RegisteredDateTime)
     try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
+        data = _by_month(month_cols, _rejection_filters(params), TOTAL_ALL)
         return [
-            dict(
-                year=row.year, month=row[1], month_name=row[2], total=row.total,
-                start_date=dates[0],
-                end_date=dates[1],
-            )
+            dict(year=row.year, month=row.month, month_name=row.month_name,
+                 total=row.total, **_window(params))
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
-# ---------------------------------------------------------------------------
-# 13. facility_rejected_samples_by_facility_service
-# ---------------------------------------------------------------------------
 def facility_rejected_samples_by_facility_service(req_args):
-    """Rejected samples grouped by RequestingFacilityName (with disaggregation support)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
-    filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.LIMSRejectionCode.is_not(None),
-        VlData.LIMSRejectionCode != "",
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_col = _get_group_column(disaggregation, facility_type)
-
+    """Rejected samples per location."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
     try:
-        query = (
-            VlData.query.with_entities(
-                group_col.label("requesting_facility"),
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(group_col)
-            .order_by(group_col)
-        )
-        data = query.all()
+        data = _by_group(params, _rejection_filters(params), TOTAL_ALL)
         return [
-            dict(
-                requesting_facility=row.requesting_facility, total=row.total,
-                start_date=dates[0],
-                end_date=dates[1],
-            )
+            dict(requesting_facility=row.requesting_facility, total=row.total, **_window(params))
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 14. facility_tat_by_month_service
+# 14/15. turnaround time   (legacy /clinic_tat, /clinic_tat_by_facility)
 # ---------------------------------------------------------------------------
+def _tat_filter_list(params):
+    return [
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *tat_filters(),
+        *requesting_location_filters(params),
+    ]
+
+
 def facility_tat_by_month_service(req_args):
-    """Turnaround time averages grouped by year/month (facility)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
-    filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
+    """TAT per month; ✱ no 90-day cap (Node's cap never applied)."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
+    month_cols = year_month_columns(VlData.AnalysisDateTime)
     try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                DATE_DIFF_AVG([VlData.SpecimenDatetime, VlData.ReceivedDateTime]).label("collection_reception"),
-                DATE_DIFF_AVG([VlData.ReceivedDateTime, VlData.RegisteredDateTime]).label("reception_registration"),
-                DATE_DIFF_AVG([VlData.RegisteredDateTime, VlData.AnalysisDateTime]).label("registration_analysis"),
-                DATE_DIFF_AVG([VlData.AnalysisDateTime, VlData.AuthorisedDateTime]).label("analysis_validation"),
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
+        data = _by_month(month_cols, _tat_filter_list(params), *tat_averages())
         return [
-            dict(
-                year=row.year, month=row[1], month_name=row[2],
-                collection_reception=row.collection_reception,
-                reception_registration=row.reception_registration,
-                registration_analysis=row.registration_analysis,
-                analysis_validation=row.analysis_validation,
-            )
+            dict(year=row.year, month=row.month, month_name=row.month_name, **_tat_values(row))
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
-# ---------------------------------------------------------------------------
-# 15. facility_tat_by_facility_service
-# ---------------------------------------------------------------------------
 def facility_tat_by_facility_service(req_args):
-    """Turnaround time averages grouped by RequestingFacilityName (with disaggregation support)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    user_id, user_role = _get_user_role(req_args)
-    access_error = _check_health_facility_access(user_id, user_role, facility_type, req_args)
-    if access_error:
-        return access_error
-
-    filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
-        VlData.RequestingProvinceName.is_not(None),
-        VlData.RequestingDistrictName.is_not(None),
-        VlData.RequestingFacilityName.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_col = _get_group_column(disaggregation, facility_type)
-
+    """TAT per location; ✱ no 90-day cap (Node's cap never applied)."""
+    params = parse_vl_params(req_args)
+    forbidden = _facility_level_forbidden(req_args, params)
+    if forbidden:
+        return forbidden
     try:
-        query = (
-            VlData.query.with_entities(
-                group_col.label("requesting_facility"),
-                DATE_DIFF_AVG([VlData.SpecimenDatetime, VlData.ReceivedDateTime]).label("collection_reception"),
-                DATE_DIFF_AVG([VlData.ReceivedDateTime, VlData.RegisteredDateTime]).label("reception_registration"),
-                DATE_DIFF_AVG([VlData.RegisteredDateTime, VlData.AnalysisDateTime]).label("registration_analysis"),
-                DATE_DIFF_AVG([VlData.AnalysisDateTime, VlData.AuthorisedDateTime]).label("analysis_validation"),
-            )
-            .filter(and_(*filters))
-            .group_by(group_col)
-            .order_by(group_col)
-        )
-        data = query.all()
+        data = _by_group(params, _tat_filter_list(params), *tat_averages())
         return [
-            dict(
-                requesting_facility=row.requesting_facility,
-                collection_reception=row.collection_reception,
-                reception_registration=row.reception_registration,
-                registration_analysis=row.registration_analysis,
-                analysis_validation=row.analysis_validation,
-                start_date=dates[0],
-                end_date=dates[1],
-            )
+            dict(requesting_facility=row.requesting_facility, **_tat_values(row), **_window(params))
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
