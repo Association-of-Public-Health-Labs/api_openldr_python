@@ -6,12 +6,15 @@ cards. They are all bound parameters; never build SQL from request text.
 """
 from math import ceil
 
+from sqlalchemy import or_
+
 from hiv.vl.models.vl import VlData
 from hiv.vl.services.vl_common import (
     TRUTHY_VALUES,
     age_range_filters,
     breastfeeding_filter,
     date_between,
+    date_between_inclusive,
     parse_vl_params,
     pregnant_filter,
     rejected_condition,
@@ -163,10 +166,22 @@ def _bad_request(message):
     return {"status": "error", "code": 400, "message": message}
 
 
+def _date_window(req_args, params, default_column):
+    """The interval_dates condition matching the card the drill-down comes from."""
+    basis = str(req_args.get("date_basis") or "").strip().lower()
+    if basis not in ("", "registration", "analysis"):
+        raise InvalidParameter("date_basis must be 'registration' or 'analysis'")
+    if _truthy(req_args.get("rejected")):
+        return date_between_inclusive(VlData.RegisteredDateTime, params.dates)
+    if basis == "analysis":
+        return date_between(VlData.AnalysisDateTime, params.dates)
+    return date_between(default_column, params.dates)
+
+
 def _search(req_args, params, date_column, filters):
     page, per_page = _paging(req_args)
     filters = [
-        date_between(date_column, params.dates),
+        _date_window(req_args, params, date_column),
         *filters,
         *_drill_down_filters(req_args, params),
     ]
@@ -248,4 +263,8 @@ def get_patients_by_test_reason_service(req_args):
     reasons = _test_reason_values(req_args.get("test_reason"))
     if not reasons:
         return _bad_request("The 'test_reason' parameter is required.")
-    return _search(req_args, params, VlData.RegisteredDateTime, [VlData.ReasonForTest.in_(reasons)])
+    reason_filter = VlData.ReasonForTest.in_(reasons)
+    if "Reason Not Specified" in split_values(req_args.get("test_reason")):
+        # NULL reasons are displayed as "Reason Not Specified".
+        reason_filter = or_(reason_filter, VlData.ReasonForTest.is_(None))
+    return _search(req_args, params, VlData.RegisteredDateTime, [reason_filter])

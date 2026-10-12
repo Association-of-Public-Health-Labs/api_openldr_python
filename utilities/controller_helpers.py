@@ -61,6 +61,7 @@ VL_PATIENT_FILTER_ARGS = VL_FILTER_ARGS + [
     ("pregnant", STR_ARG),
     ("breastfeeding", STR_ARG),
     ("rejected", STR_ARG),
+    ("date_basis", STR_ARG),
 ]
 
 GENERIC_SERVER_ERROR = "An error occurred"

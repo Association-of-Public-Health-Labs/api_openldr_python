@@ -30,7 +30,8 @@ def test_by_facility_applies_drill_down_filters(app):
         "rejected": "1", "result_type": ["not_suppressed"],
     })
     assert result["status"] == "success"
-    assert "[VlData].[RegisteredDateTime] BETWEEN '2025-01-01' AND '2025-12-31'" in sql
+    # rejected=1 switches to the rejection cards' inclusive registration window
+    assert "CAST([VlData].[RegisteredDateTime] AS DATE) >= '2025-01-01'" in sql
     assert "[VlData].[RequestingFacilityName] = 'CS X'" in sql
     assert "[VlData].[RequestingProvinceName] IN ('Gaza')" in sql
     assert "[VlData].[RequestingDistrictName] IN ('Chibuto')" in sql
@@ -117,3 +118,37 @@ def test_process_vl_patient_picks_first_non_empty_values():
     assert record["phone"] == "84 000 0000"
     assert record["final_result"] == "<20"
     assert record["reason_for_test"] == "Suspected treatment failure"
+
+
+def test_date_basis_analysis_windows_on_analysis_date(app):
+    _, sql = run(app, patients.get_patients_by_facility_service,
+                 {"health_facility": "CS X", "date_basis": "analysis"})
+    assert "[VlData].[AnalysisDateTime] BETWEEN '2025-01-01' AND '2025-12-31'" in sql
+    assert "RegisteredDateTime] BETWEEN" not in sql
+
+
+def test_rejected_uses_inclusive_registration_window(app):
+    _, sql = run(app, patients.get_patients_by_facility_service,
+                 {"health_facility": "CS X", "rejected": "true", "date_basis": "analysis"})
+    assert "CAST([VlData].[RegisteredDateTime] AS DATE) >=" in sql
+    assert "AnalysisDateTime] BETWEEN" not in sql
+
+
+def test_bogus_date_basis_is_a_400(app):
+    with pytest.raises(InvalidParameter):
+        service_sql(app, patients.get_patients_by_facility_service,
+                    {**ARGS, "health_facility": "CS X", "date_basis": "bogus"})
+
+
+def test_registration_basis_keeps_endpoint_default(app):
+    _, sql = run(app, patients.get_patients_by_result_type_service,
+                 {"result_type": ["suppressed"], "date_basis": "registration"})
+    assert "[VlData].[AnalysisDateTime] BETWEEN" in sql
+
+
+def test_reason_not_specified_includes_null_reasons(app):
+    _, sql = run(app, patients.get_patients_by_test_reason_service,
+                 {"test_reason": ["Reason Not Specified"]})
+    assert "[VlData].[ReasonForTest] IS NULL" in sql
+    assert "[VlData].[ReasonForTest] IN ('Não preenchido'" in sql
+

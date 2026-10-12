@@ -78,6 +78,7 @@ class VlPatientsByName(Resource):
             - $ref: '#/parameters/PregnantParameter'
             - $ref: '#/parameters/BreastfeedingParameter'
             - $ref: '#/parameters/RejectedParameter'
+            - $ref: '#/parameters/DateBasisParameter'
         responses:
             200:
                 description: A List of VL Patients matching the name criteria.
@@ -120,6 +121,7 @@ class VlPatientsByFacility(Resource):
             - $ref: '#/parameters/PregnantParameter'
             - $ref: '#/parameters/BreastfeedingParameter'
             - $ref: '#/parameters/RejectedParameter'
+            - $ref: '#/parameters/DateBasisParameter'
         responses:
             200:
                 description: A List of VL Patients registered at the facility.
@@ -170,6 +172,7 @@ class VlPatientsByResultType(Resource):
             - $ref: '#/parameters/PregnantParameter'
             - $ref: '#/parameters/BreastfeedingParameter'
             - $ref: '#/parameters/RejectedParameter'
+            - $ref: '#/parameters/DateBasisParameter'
         responses:
             200:
                 description: A List of VL Patients filtered by result type.
@@ -213,6 +216,7 @@ class VlPatientsByTestReason(Resource):
             - $ref: '#/parameters/PregnantParameter'
             - $ref: '#/parameters/BreastfeedingParameter'
             - $ref: '#/parameters/RejectedParameter'
+            - $ref: '#/parameters/DateBasisParameter'
         responses:
             200:
                 description: A List of VL Patients filtered by test reason.

@@ -549,6 +549,14 @@ swagger_template = {
             "required": False,
             "description": "Only breastfeeding women (BreastFeeding in YES/Yes/yes/Sim/SIM/sim).",
         },
+        "DateBasisParameter": {
+            "name": "date_basis",
+            "in": "query",
+            "type": "string",
+            "enum": ["registration", "analysis"],
+            "required": False,
+            "description": "Which date the interval_dates window applies to. registration (default) = RegisteredDateTime; analysis = AnalysisDateTime (use for drill-downs from tested/suppression/pregnancy/age cards). rejected=true always uses the inclusive registration date, like the rejection cards.",
+        },
         "RejectedParameter": {
             "name": "rejected",
             "in": "query",
