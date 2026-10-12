@@ -60,7 +60,7 @@ api_openldr_python/
 │
 └── hiv/                        # HIV module
     ├── vl/                     # Viral Load
-    │   ├── routes.py           # Currently 1 endpoint
+    │   ├── routes.py           # 45 routes: laboratories, facilities, summary, patients
     │   ├── models/             # vl.py (VlData - 150+ columns)
     │   ├── controllers/        # laboratory, facilities, summary
     │   └── services/           # laboratory, facilities, summary
@@ -278,7 +278,7 @@ gunicorn --bind 0.0.0.0:5000 app:app
 waitress-serve --host=127.0.0.1 --port=9001 app:app
 ```
 
-No test suite or linter configuration currently exists.
+Tests run with `python -m pytest -q` (no database needed). No linter configuration exists.
 
 ## Environment Variables
 
@@ -298,7 +298,7 @@ The active environment binding is selected in `app.py` by assigning one of the t
 
 ### Multi-Database Setup
 
-The app connects to **6 SQL Server databases** simultaneously using SQLAlchemy binds. Each ORM model specifies which database it belongs to via `__bind_key__`:
+The app connects to **7 SQL Server databases** simultaneously using SQLAlchemy binds. Each ORM model specifies which database it belongs to via `__bind_key__`:
 
 - `vl` — HIV Viral Load data
 - `dpi` — Drug Program Information
@@ -306,6 +306,7 @@ The app connects to **6 SQL Server databases** simultaneously using SQLAlchemy b
 - `tb` — TB GeneXpert data
 - `dict` — Reference data (facilities/laboratories)
 - `users` — Authentication & user logs
+- `reportData` — Weekly VL lab reports (ReportData.Resume)
 
 Connection strings use `mssql+pyodbc` with ODBC Driver 17 for SQL Server.
 

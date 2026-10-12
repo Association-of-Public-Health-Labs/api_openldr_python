@@ -527,9 +527,11 @@ Set at least:
 - `Flask.secret_key`
 - `Domains.local`, `Domains.cdr`, `Domains.cloud`, `Domains.tb`
 - `Databases.database_user`, `Databases.database_password`
-- `Databases.ViralLoadData`, `Databases.Dpi`, `Databases.HivAdvancedDisease`, `Databases.TBData`, `Databases.Dictionary`, `Databases.Users`
+- `Databases.ViralLoadData`, `Databases.Dpi`, `Databases.HivAdvancedDisease`, `Databases.TBData`, `Databases.Dictionary`, `Databases.Users`, `Databases.ReportData`
 - `Schemas.cdr_schema`
 - `Clerk.clerk_webhook_secret`, `Clerk.secret_key`, `Clerk.api_endpoint`, `Clerk.clerk_jwts_url`, `Clerk.clerk_issuer`, `Clerk.clerk_public_key`
+
+`Databases.ReportData` / `DB_REPORT_DATA` is the ReportData database (weekly VL lab reports, table `Resume`); same SQL Server host and credentials as the other databases. The weekly report endpoints need it.
 
 For a named SQL Server instance, `Domains.cdr` can include the instance name, for example `disamoz.org.mz\SQLEXPRESS` or `CDR\SQLEXPRESS`.
 
@@ -541,7 +543,7 @@ Common variables:
 
 - `FLASK_SECRET_KEY`
 - `LOCAL_DOMAIN`, `CDR_DOMAIN`, `CLOUD_DOMAIN`, `TB_DASHBOARD_DOMAIN`
-- `DB_USER`, `DB_PASSWORD`, `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS`
+- `DB_USER`, `DB_PASSWORD`, `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS`, `DB_REPORT_DATA`
 - `SCHEMA_CDR`
 - `CLERK_WEBHOOK_SECRET_KEY`, `CLERK_SECRET_KEY`, `CLERK_API_URL`, `CLERK_JWTS_URL`, `CLERK_ISSUER`, `CLERK_PUBLIC_KEY`
 
