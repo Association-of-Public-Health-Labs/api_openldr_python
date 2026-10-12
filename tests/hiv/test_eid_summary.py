@@ -153,9 +153,6 @@ class TestEidSummaryEndpoints:
             response = client.get(url, headers=auth_headers)
             assert response.status_code == 200
 
-    # Note: the application uses ``get_unverified_payload`` which never
-    # raises, so the API does not enforce 401 on missing tokens.
-
 
 class TestEidSummaryIndicatorsResponse:
     """Test response structure for indicators endpoint."""

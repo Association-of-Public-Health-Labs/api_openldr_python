@@ -1,6 +1,3 @@
-import jwt
-import requests
-from jwt.algorithms import RSAAlgorithm
 from sqlalchemy import and_, or_, func, case, text
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -686,7 +683,7 @@ def get_token(request):
 
     This function retrieves the token from the 'Authorization' header
     in the request object. If the header is not present or does not
-    contain a space-separated token, it returns None.
+    contain a Bearer token, it returns None.
 
     Args:
         request: The HTTP request object containing headers.
@@ -695,70 +692,12 @@ def get_token(request):
         str or None: The extracted token if present, otherwise None.
     """
 
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or " " not in auth_header:
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    scheme, _, token = auth_header.partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
         return None
-    return auth_header.split(" ")[1]
-
-
-def get_unverified_payload(token):
-    """
-    Decodes a JWT token without verifying its signature.
-
-    Args:
-        token: The token to decode.
-
-    Returns:
-        dict: The decoded payload if the token is valid, otherwise an error message.
-    """
-    try:
-        # Decode without verifying the signature
-        payload = jwt.decode(
-            token,
-            options={"verify_signature": False},
-        )
-
-        return payload
-
-    except Exception as e:
-        return {"message": str(e)}
-
-
-def get_public_key(kid):
-    jwks = requests.get(CLERK_JWTS_URL).json()
-    for key in jwks['keys']:
-        if key['kid'] == kid:
-            # from_jwk expects a JSON string, not dict or bytes
-            return RSAAlgorithm.from_jwk(json.dumps(key))
-    return None
-
-
-def verify_clerk_token(token):
-    # Ensure token is a string
-    if isinstance(token, bytes):
-        token = token.decode("utf-8")
-
-    # Extract key ID
-    unverified_header = jwt.get_unverified_header(token)
-    kid = unverified_header['kid']
-    print(f"Token kid: {kid}")
-
-    # Get matching public key
-    public_key = get_public_key(kid)
-    if public_key is None:
-        return {"message": "Public key not found for kid"}
-
-    try:
-        # Decode and verify signature
-        payload = jwt.decode(
-            token,
-            public_key,
-            algorithms=['RS256'],
-            issuer=CLERK_ISSUER
-        )
-        return payload
-    except Exception as e:
-        return {"message": str(e)}
+    return token
 
 
 def get_user_token_info(token_payload):
