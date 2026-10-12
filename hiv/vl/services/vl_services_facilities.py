@@ -296,8 +296,8 @@ def facility_tested_samples_by_age_by_month_service(req_args):
                 *month_cols,
                 subq.c.age_group,
                 func.count().label("total"),
-                func.count(case((subq.c.category == "Suppressed", 1), else_=None)).label("suppressed"),
-                func.count(case((subq.c.category == "Not Suppressed", 1), else_=None)).label("not_suppressed"),
+                suppressed_count(column=subq.c.category),
+                not_suppressed_count(column=subq.c.category),
             )
             .group_by(*month_cols, subq.c.age_group)
             .order_by(month_cols[0], month_cols[1], subq.c.age_group)
@@ -351,8 +351,8 @@ def facility_tested_samples_by_age_by_facility_service(req_args):
                 subq.c.requesting_facility,
                 subq.c.age_group,
                 func.count().label("total"),
-                func.count(case((subq.c.category == "Suppressed", 1), else_=None)).label("suppressed"),
-                func.count(case((subq.c.category == "Not Suppressed", 1), else_=None)).label("not_suppressed"),
+                suppressed_count(column=subq.c.category),
+                not_suppressed_count(column=subq.c.category),
             )
             .group_by(subq.c.requesting_facility, subq.c.age_group)
             .order_by(subq.c.requesting_facility, subq.c.age_group)

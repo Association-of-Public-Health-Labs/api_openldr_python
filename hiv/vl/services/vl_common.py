@@ -165,12 +165,14 @@ def tested_count(label="tested"):
     )
 
 
-def suppressed_count(label="suppressed"):
-    return count_where(VlData.ViralLoadResultCategory == "Suppressed", label)
+def suppressed_count(label="suppressed", column=None):
+    column = VlData.ViralLoadResultCategory if column is None else column
+    return count_where(column == "Suppressed", label)
 
 
-def not_suppressed_count(label="not_suppressed"):
-    return count_where(VlData.ViralLoadResultCategory == "Not Suppressed", label)
+def not_suppressed_count(label="not_suppressed", column=None):
+    column = VlData.ViralLoadResultCategory if column is None else column
+    return count_where(column == "Not Suppressed", label)
 
 
 def rejected_condition():

@@ -210,3 +210,10 @@ def test_process_common_params_vl_falsy_disaggregation(raw):
 def test_process_common_params_vl_default_dates_are_ordered():
     dates = PROCESS_COMMON_PARAMS_VL({})[0]
     assert len(dates) == 2 and dates[0] < dates[1]
+
+
+def test_suppression_counts_accept_another_column(vl):
+    from sqlalchemy import column
+    category = column("category")
+    assert "category = 'Suppressed'" in to_sql(vl.suppressed_count(column=category))
+    assert "category = 'Not Suppressed'" in to_sql(vl.not_suppressed_count(column=category))
