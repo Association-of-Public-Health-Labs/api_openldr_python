@@ -225,3 +225,40 @@ def test_hs256_token_with_wrong_secret_rejected(app):
     with app.app_context():
         with pytest.raises(tv.TokenVerificationError):
             tv.verify_bearer_token(forged)
+
+
+# --- Malformed JWKS handling -----------------------------------------------
+
+def _configure(monkeypatch, fetch):
+    monkeypatch.setattr(paths, "CLERK_ISSUER", ISSUER)
+    monkeypatch.setattr(paths, "CLERK_AUTHORIZED_PARTIES", None)
+    monkeypatch.setattr(tv, "_clerk_jwks", tv.JwksCache(fetch))
+
+
+def test_malformed_jwk_skipped_without_dropping_valid_keys(monkeypatch):
+    def fetch():
+        jwks = make_jwks()
+        jwks["keys"].insert(0, {"kty": "RSA", "kid": "bad", "n": "!!", "e": "AQAB"})
+        return jwks
+
+    _configure(monkeypatch, fetch)
+    assert tv.verify_bearer_token(make_clerk_token())["sub"] == "user_abc"
+    with pytest.raises(tv.TokenVerificationError):
+        tv.verify_bearer_token(make_clerk_token(kid="bad"))
+
+
+def test_non_dict_jwks_response_rejected(monkeypatch):
+    _configure(monkeypatch, lambda: ["not", "a", "jwks"])
+    with pytest.raises(tv.TokenVerificationError):
+        tv.verify_bearer_token(make_clerk_token())
+
+
+def test_key_store_failure_becomes_verification_error(monkeypatch):
+    class Boom:
+        def get_key(self, kid):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(paths, "CLERK_ISSUER", ISSUER)
+    monkeypatch.setattr(tv, "_clerk_jwks", Boom())
+    with pytest.raises(tv.TokenVerificationError):
+        tv.verify_bearer_token(make_clerk_token())

@@ -82,10 +82,22 @@ class JwksCache:
             logger.error("Could not fetch Clerk JWKS: %s", exc)
             return
 
+        if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
+            logger.error("Clerk JWKS response is not a valid key set")
+            return
+
+        entries = jwks["keys"]
         keys = {}
-        for jwk in jwks.get("keys", []):
-            if jwk.get("kty") == "RSA" and jwk.get("kid"):
-                keys[jwk["kid"]] = RSAAlgorithm.from_jwk(json.dumps(jwk))
+        for jwk in entries:
+            kid = jwk.get("kid") if isinstance(jwk, dict) else None
+            try:
+                if isinstance(jwk, dict) and jwk.get("kty") == "RSA" and kid:
+                    keys[kid] = RSAAlgorithm.from_jwk(json.dumps(jwk))
+            except Exception as exc:
+                logger.warning("Skipping unusable JWK %r: %s", kid, exc)
+        if entries and not keys:
+            logger.error("Clerk JWKS contained no usable keys; keeping cached keys")
+            return
         self._keys = keys
 
 
@@ -133,7 +145,10 @@ def _verify_clerk_token(token, kid):
     if not kid:
         raise TokenVerificationError("token has no kid")
 
-    key = _clerk_jwks.get_key(kid)
+    try:
+        key = _clerk_jwks.get_key(kid)
+    except Exception as exc:
+        raise TokenVerificationError("could not load signing keys") from exc
     if key is None:
         raise TokenVerificationError(f"unknown signing key {kid}")
 
