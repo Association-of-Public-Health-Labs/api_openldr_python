@@ -39,6 +39,7 @@ from hiv.vl.controllers.vl_controller_summary import (
     VlSummaryTatByMonth,
     VlSummarySuppressionByProvinceByMonth,
     VlSummarySamplesHistoryByMonth,
+    VlSummaryTatVsDisalinks,
 )
 from hiv.vl.controllers.vl_controller_patients import (
     VlPatientsByName,
@@ -117,7 +118,7 @@ def vl_routes(api):
     api.add_resource(VlFacilityTatByFacility, "/hiv/vl/facilities/tat_by_facility/")
 
     # Summary/Dashboard Endpoints
-    # Legacy: GET /dash_indicators
+    # No legacy equivalent (single-row header totals)
     api.add_resource(VlSummaryHeaderIndicatorsByMonth, "/hiv/vl/summary/header_indicators_by_month/")
     # Legacy: GET /dash_number_of_samples
     api.add_resource(VlSummaryNumberOfSamplesByMonth, "/hiv/vl/summary/number_of_samples_by_month/")
@@ -127,8 +128,10 @@ def vl_routes(api):
     api.add_resource(VlSummaryTatByMonth, "/hiv/vl/summary/tat_by_month/")
     # Legacy: GET /dash_map
     api.add_resource(VlSummarySuppressionByProvinceByMonth, "/hiv/vl/summary/suppression_by_province_by_month/")
-    # Legacy: GET /sampleshistory
+    # Legacy: GET /dash_indicators
     api.add_resource(VlSummarySamplesHistoryByMonth, "/hiv/vl/summary/samples_history/")
+    # Legacy: GET /dash_tat_vs_disalinks
+    api.add_resource(VlSummaryTatVsDisalinks, "/hiv/vl/summary/tat_vs_disalinks/")
 
     # Patients Endpoints
     api.add_resource(
