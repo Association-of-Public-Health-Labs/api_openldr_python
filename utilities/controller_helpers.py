@@ -33,9 +33,11 @@ Usage example::
 
 from flask import request, session
 from flask_restful import reqparse
+from werkzeug.exceptions import HTTPException
 
 import logging
 
+from utilities.service_helpers import InvalidParameter
 from utilities.token_verification import TokenVerificationError, verify_bearer_token
 from utilities.utils import get_token, get_user_token_info
 
@@ -47,6 +49,21 @@ LIST_ARG = {"type": lambda x: x, "location": "args", "action": "append"}
 
 # Argument definition for simple string query parameters.
 STR_ARG = {"type": str, "location": "args"}
+
+# Extra filters understood by the HIV VL reporting endpoints.
+VL_FILTER_ARGS = [
+    ("lab_code", LIST_ARG),
+    ("age_range", LIST_ARG),
+]
+
+# Extra filters for the VL patient searches (drill-down from the cards).
+VL_PATIENT_FILTER_ARGS = VL_FILTER_ARGS + [
+    ("pregnant", STR_ARG),
+    ("breastfeeding", STR_ARG),
+    ("rejected", STR_ARG),
+]
+
+GENERIC_SERVER_ERROR = "An error occurred"
 
 
 def build_common_parser(*, extra_args=None):
@@ -137,26 +154,43 @@ def authenticate_request():
     return user_id, None
 
 
+def service_result_response(result):
+    """
+    Turn a service's error dict into a real HTTP status.
+
+    Services return ``{"status": "error", "code": N, ...}`` on failure. 4xx
+    bodies are returned as they are. For 5xx the exception text (``error``)
+    is logged and dropped, and the message is replaced with a generic one,
+    so SQL and driver details never reach the caller.
+    """
+    if not (isinstance(result, dict) and result.get("status") == "error"):
+        return result
+
+    code = result.get("code")
+    if not isinstance(code, int) or not 400 <= code <= 599:
+        code = 500
+
+    if result.get("error"):
+        logger.error("Service error on %s: %s", request.path, result["error"])
+
+    body = {key: value for key, value in result.items() if key != "error"}
+    body["code"] = code
+    if code >= 500:
+        body["message"] = GENERIC_SERVER_ERROR
+    return body, code
+
+
 def run_reporting_endpoint(parse_fn, service_fn):
     """
     Execute the standard pipeline shared by every reporting endpoint.
 
     1. Authenticate the request and populate the session.
-    2. Parse the request arguments via ``parse_fn`` (typically a bound
-       ``parser.parse_args`` method).
+    2. Parse the request arguments via ``parse_fn``.
     3. Inject ``user_id`` into the parsed arguments.
-    4. Invoke ``service_fn(req_args)`` and jsonify the result.
-    5. Normalize any unexpected exception into a ``500`` response with the
-       standard error payload.
-
-    Parameters
-    ----------
-    parse_fn : callable
-        Zero-argument callable that returns the parsed request arguments
-        (usually ``parser.parse_args``).
-    service_fn : callable
-        Service function that accepts the parsed ``req_args`` dict and
-        returns a JSON-serializable response.
+    4. Invoke ``service_fn(req_args)``.
+    5. Map the outcome to an HTTP response: ``InvalidParameter`` -> 400,
+       service error dicts -> their own status, anything unexpected -> a
+       generic 500 (details are logged, never returned).
     """
     user_id, err = authenticate_request()
     if err is not None:
@@ -165,6 +199,13 @@ def run_reporting_endpoint(parse_fn, service_fn):
     try:
         req_args = parse_fn()
         req_args["user_id"] = user_id
-        return service_fn(req_args)
-    except Exception as exc:
-        return error_response(exc)
+        result = service_fn(req_args)
+    except HTTPException:
+        raise
+    except InvalidParameter as exc:
+        return {"status": "error", "code": 400, "message": str(exc)}, 400
+    except Exception:
+        logger.exception("Unhandled error on %s", request.path)
+        return {"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500
+
+    return service_result_response(result)

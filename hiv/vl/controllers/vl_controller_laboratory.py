@@ -18,13 +18,14 @@ from hiv.vl.services.vl_services_laboratory import (
     suppression_service,
 )
 from utilities.controller_helpers import (
+    VL_FILTER_ARGS,
     build_common_parser,
     run_reporting_endpoint,
 )
 
 
 # Shared parser for all VL laboratory endpoints.
-_parser = build_common_parser()
+_parser = build_common_parser(extra_args=VL_FILTER_ARGS)
 
 
 def _endpoint(service):

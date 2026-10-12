@@ -9,13 +9,14 @@ from hiv.vl.services.vl_services_summary import (
     samples_history_service_by_month,
 )
 from utilities.controller_helpers import (
+    VL_FILTER_ARGS,
     build_common_parser,
     run_reporting_endpoint,
 )
 
 
 # Shared parser for all VL summary endpoints.
-_parser = build_common_parser()
+_parser = build_common_parser(extra_args=VL_FILTER_ARGS)
 
 
 class VlSummaryHeaderIndicatorsByMonth(Resource):

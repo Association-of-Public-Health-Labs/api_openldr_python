@@ -9,6 +9,7 @@ from hiv.vl.services.vl_services_patients import (
 from utilities.controller_helpers import (
     LIST_ARG,
     STR_ARG,
+    VL_PATIENT_FILTER_ARGS,
     build_common_parser,
     run_reporting_endpoint,
 )
@@ -29,6 +30,7 @@ _parser = build_common_parser(
         ("test_reason", LIST_ARG),
         ("page", {"type": int, "location": "args", "default": 1}),
         ("per_page", {"type": int, "location": "args", "default": 50}),
+        *VL_PATIENT_FILTER_ARGS,
     ]
 )
 
