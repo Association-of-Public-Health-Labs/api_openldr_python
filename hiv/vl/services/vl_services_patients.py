@@ -215,9 +215,9 @@ def get_patients_by_name_service(req_args):
         return _bad_request("At least one of 'first_name' or 'surname' must be provided.")
     filters = []
     if first_name:
-        filters.append(VlData.FIRSTNAME.ilike(f"%{first_name}%"))
+        filters.append(VlData.FIRSTNAME.icontains(first_name, autoescape=True))
     if surname:
-        filters.append(VlData.SURNAME.ilike(f"%{surname}%"))
+        filters.append(VlData.SURNAME.icontains(surname, autoescape=True))
     return _search(req_args, params, VlData.RegisteredDateTime, filters)
 
 

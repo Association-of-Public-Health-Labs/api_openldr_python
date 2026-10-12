@@ -531,7 +531,7 @@ swagger_template = {
             "type": "string",
             "required": False,
             "example": "15,49",
-            "description": "Inclusive age range in years, as min,max (e.g. 15,49).",
+            "description": "Inclusive age range in years, as min,max (e.g. 15,49). No age filter is applied when omitted (the legacy API defaulted to 15,49; the dashboard sends 15,49 itself).",
         },
         "PregnantParameter": {
             "name": "pregnant",

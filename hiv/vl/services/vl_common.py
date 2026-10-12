@@ -82,6 +82,8 @@ def _validated_dates(raw):
             raise InvalidParameter(
                 "interval_dates must be two YYYY-MM-DD dates: start,end"
             ) from None
+    if dates[0] > dates[1]:
+        raise InvalidParameter("interval_dates start must not be after end")
     return dates
 
 

@@ -79,3 +79,9 @@ def test_weekly_routes_exist(client, auth_headers):
     target = "hiv.vl.controllers.vl_controller_laboratory.weekly_report_national_service"
     with patch(target, return_value=[]):
         assert client.get("/hiv/vl/laboratories/weekly_report_national/", headers=auth_headers).status_code == 200
+
+
+def test_blank_interval_dates_use_the_current_week_default(app):
+    with patch.object(weekly, "_today", return_value=date(2026, 10, 12)):
+        _, [sql] = service_sql(app, weekly.weekly_report_service, {"interval_dates": [""]})
+    assert "CAST([Resume].start_date AS DATE) >= '2026-10-11'" in sql

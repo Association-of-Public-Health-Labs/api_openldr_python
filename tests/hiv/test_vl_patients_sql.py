@@ -152,3 +152,8 @@ def test_reason_not_specified_includes_null_reasons(app):
     assert "[VlData].[ReasonForTest] IS NULL" in sql
     assert "[VlData].[ReasonForTest] IN ('Não preenchido'" in sql
 
+
+def test_name_search_escapes_like_wildcards(app):
+    _, sql = run(app, patients.get_patients_by_name_service, {"first_name": "50%_x"})
+    assert "ESCAPE" in sql
+    assert "50/%/_x" in sql

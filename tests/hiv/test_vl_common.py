@@ -202,6 +202,11 @@ def test_parse_vl_params_rejects_wrong_number_of_dates(vl, raw):
         vl.parse_vl_params({"interval_dates": raw})
 
 
+def test_parse_vl_params_rejects_reversed_dates(vl):
+    with pytest.raises(InvalidParameter, match="must not be after end"):
+        vl.parse_vl_params({"interval_dates": ["2025-12-31,2025-01-01"]})
+
+
 @pytest.mark.parametrize("raw", [None, "False", "false", "0", "no"])
 def test_process_common_params_vl_falsy_disaggregation(raw):
     assert PROCESS_COMMON_PARAMS_VL({"disaggregation": raw})[3] is False

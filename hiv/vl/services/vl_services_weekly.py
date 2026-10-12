@@ -12,7 +12,11 @@ from sqlalchemy import func
 
 from db.database import db
 from hiv.vl.models.report_data import Resume
-from hiv.vl.services.vl_common import date_between_inclusive, parse_vl_params
+from hiv.vl.services.vl_common import (
+    date_between_inclusive,
+    parse_vl_params,
+    split_values,
+)
 from utilities.service_helpers import InvalidParameter
 
 
@@ -38,7 +42,7 @@ def _day(value):
 
 def _resume_rows(req_args, by_lab, default_window):
     params = parse_vl_params(req_args)
-    dates = params.dates if req_args.get("interval_dates") else default_window(_today())
+    dates = params.dates if split_values(req_args.get("interval_dates")) else default_window(_today())
 
     keys = [Resume.week, Resume.start_date, Resume.end_date]
     if by_lab:
