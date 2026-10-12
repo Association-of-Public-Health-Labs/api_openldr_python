@@ -189,3 +189,24 @@ def test_lab_code_filters(vl):
 
 def test_rejection_lab_code_is_requestid_substring(vl):
     assert to_sql(vl.rejection_lab_code()) == "substring([VlData].[RequestID], 7, 3)"
+
+
+# --- interval_dates must be exactly two dates ------------------------------
+@pytest.mark.parametrize("raw", [
+    ["2025-01-01"],
+    "2025-01-01",
+    ["2025-01-01,2025-02-01,2025-03-01"],
+])
+def test_parse_vl_params_rejects_wrong_number_of_dates(vl, raw):
+    with pytest.raises(InvalidParameter):
+        vl.parse_vl_params({"interval_dates": raw})
+
+
+@pytest.mark.parametrize("raw", [None, "False", "false", "0", "no"])
+def test_process_common_params_vl_falsy_disaggregation(raw):
+    assert PROCESS_COMMON_PARAMS_VL({"disaggregation": raw})[3] is False
+
+
+def test_process_common_params_vl_default_dates_are_ordered():
+    dates = PROCESS_COMMON_PARAMS_VL({})[0]
+    assert len(dates) == 2 and dates[0] < dates[1]

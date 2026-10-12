@@ -69,6 +69,11 @@ def parse_age_range(raw):
 
 
 def _validated_dates(raw):
+    values = split_values(raw)
+    if values and len(values) != 2:
+        raise InvalidParameter(
+            "interval_dates must be two YYYY-MM-DD dates: start,end"
+        )
     dates = coerce_interval_dates(raw)
     for value in dates:
         try:
