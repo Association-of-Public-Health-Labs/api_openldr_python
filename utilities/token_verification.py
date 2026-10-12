@@ -8,7 +8,9 @@ Two token kinds are accepted:
   (``CLERK_ISSUER``), expiry and, when configured, the authorized parties
   (``CLERK_AUTHORIZED_PARTIES``).
 * Tokens issued by this API's ``/auth`` login (HS256, Flask-JWT-Extended),
-  verified with the application's JWT secret.
+  verified with the application's JWT secret. If that secret is unset, the
+  public default ``"default-secret-key"`` or shorter than 32 bytes, every API
+  token is rejected (fail closed).
 
 Anything else raises :class:`TokenVerificationError`. Callers must turn that
 into a generic 401 without echoing the exception text to the client.
@@ -21,6 +23,7 @@ import time
 
 import jwt
 import requests
+from flask import current_app
 from flask_jwt_extended import decode_token
 from jwt.algorithms import RSAAlgorithm
 
@@ -32,6 +35,8 @@ JWKS_FETCH_TIMEOUT_SECONDS = 5
 JWKS_MIN_REFRESH_INTERVAL_SECONDS = 60
 CLOCK_SKEW_LEEWAY_SECONDS = 5
 REQUIRED_CLERK_CLAIMS = ["exp", "iat", "iss", "sub"]
+DEFAULT_SECRET_KEY = "default-secret-key"
+MIN_API_SECRET_BYTES = 32
 
 
 class TokenVerificationError(Exception):
@@ -178,7 +183,23 @@ def _check_authorized_party(claims):
         raise TokenVerificationError(f"unauthorized party {claims.get('azp')}")
 
 
+def _api_secret_is_weak():
+    config = current_app.config
+    secret = config.get("JWT_SECRET_KEY") or config.get("SECRET_KEY")
+    if not secret or secret == DEFAULT_SECRET_KEY:
+        return True
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+    return len(secret) < MIN_API_SECRET_BYTES
+
+
 def _verify_api_token(token):
+    if _api_secret_is_weak():
+        logger.error(
+            "Rejecting API token: JWT_SECRET_KEY/SECRET_KEY is unset, the "
+            "default, or shorter than %d bytes", MIN_API_SECRET_BYTES
+        )
+        raise TokenVerificationError("API token secret is weak or unset")
     try:
         return decode_token(token)
     except Exception as exc:

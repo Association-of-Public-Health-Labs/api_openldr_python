@@ -262,3 +262,66 @@ def test_key_store_failure_becomes_verification_error(monkeypatch):
     monkeypatch.setattr(tv, "_clerk_jwks", Boom())
     with pytest.raises(tv.TokenVerificationError):
         tv.verify_bearer_token(make_clerk_token())
+
+
+# --- Weak / default HS256 secret (fail closed) -----------------------------
+
+STRONG_SECRET = "s" * 32
+
+
+@pytest.fixture
+def jwt_secrets(app):
+    """Override JWT_SECRET_KEY / SECRET_KEY for one test and restore them."""
+    saved = {k: app.config.get(k) for k in ("JWT_SECRET_KEY", "SECRET_KEY")}
+
+    def configure(jwt_secret_key, secret_key="unused-flask-secret-key-0123456789"):
+        app.config["JWT_SECRET_KEY"] = jwt_secret_key
+        app.config["SECRET_KEY"] = secret_key
+
+    yield configure
+    app.config.update(saved)
+
+
+def _api_token(app):
+    with app.app_context():
+        return create_access_token(identity="u1", additional_claims={"user_id": "u1"})
+
+
+def _verify(app, token):
+    with app.app_context():
+        return tv.verify_bearer_token(token)
+
+
+@pytest.mark.parametrize(
+    "jwt_secret_key,secret_key",
+    [
+        ("default-secret-key", None),
+        (None, "default-secret-key"),
+        ("short-secret", None),
+        ("x" * 31, None),
+    ],
+    ids=["jwt-default", "flask-default-fallback", "short", "31-bytes"],
+)
+def test_weak_api_secret_rejects_api_tokens(app, jwt_secrets, jwt_secret_key, secret_key):
+    jwt_secrets(jwt_secret_key, secret_key)
+    token = _api_token(app)
+    with pytest.raises(tv.TokenVerificationError, match="weak or unset"):
+        _verify(app, token)
+
+
+def test_unset_api_secret_rejects_api_tokens(app, jwt_secrets):
+    jwt_secrets(STRONG_SECRET)
+    token = _api_token(app)
+    jwt_secrets(None, None)
+    with pytest.raises(tv.TokenVerificationError, match="weak or unset"):
+        _verify(app, token)
+
+
+def test_strong_api_secret_accepts_api_tokens(app, jwt_secrets):
+    jwt_secrets(STRONG_SECRET)
+    assert _verify(app, _api_token(app))["user_id"] == "u1"
+
+
+def test_strong_flask_secret_fallback_accepts_api_tokens(app, jwt_secrets):
+    jwt_secrets(None, STRONG_SECRET)
+    assert _verify(app, _api_token(app))["user_id"] == "u1"

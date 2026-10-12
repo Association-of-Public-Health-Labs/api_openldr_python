@@ -31,7 +31,7 @@ def app():
     }
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = "test-secret-key"
-    app.config["JWT_SECRET_KEY"] = "test-jwt-secret"
+    app.config["JWT_SECRET_KEY"] = "test-jwt-secret-at-least-32-bytes-long"
 
     jwt = JWTManager(app)
     db.init_app(app)
