@@ -1,10 +1,3 @@
-from flask import jsonify, request, session
-from flask_jwt_extended import verify_jwt_in_request
-
-from utilities.service_helpers import build_error_response
-from utilities.utils import get_token, get_unverified_payload, get_user_token_info
-
-
 def add_tb_common_args(
     parser,
     *,
@@ -46,22 +39,3 @@ def add_tb_common_args(
         parser.add_argument("per_page", type=int, location="args", default=50)
 
     return parser
-
-
-def execute_tb_service(service, req_args):
-    """Validate JWT, attach user_id to parsed args, and execute a TB service."""
-    verify_jwt_in_request()
-
-    token = get_token(request) or "Unknown"
-    token_payload = get_unverified_payload(token)
-
-    if token_payload.get("message"):
-        return jsonify(build_error_response(token_payload["message"])), 500
-
-    session["user_info"] = get_user_token_info(token_payload)
-    req_args["user_id"] = str(session.get("user_info", {}).get("user_id"))
-
-    try:
-        return jsonify(service(req_args))
-    except Exception as error:
-        return jsonify(build_error_response(error)), 500

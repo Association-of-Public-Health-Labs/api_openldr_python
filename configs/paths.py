@@ -78,6 +78,12 @@ CLERK_API_URL = get_config("Clerk", "api_endpoint", "CLERK_API_URL")
 CLERK_JWTS_URL = get_config("Clerk", "clerk_jwts_url", "CLERK_JWTS_URL")
 CLERK_ISSUER = get_config("Clerk", "clerk_issuer", "CLERK_ISSUER")
 CLERK_PUBLIC_KEY = get_config("Clerk", "clerk_public_key", "CLERK_PUBLIC_KEY")
+# Optional comma-separated list of origins allowed in a Clerk token's ``azp``
+# claim (e.g. "https://tb.openldr.org.mz,https://vl.openldr.org.mz").
+# Empty means the azp claim is not checked.
+CLERK_AUTHORIZED_PARTIES = get_config(
+    "Clerk", "clerk_authorized_parties", "CLERK_AUTHORIZED_PARTIES"
+)
 
 
 # -----------------------------

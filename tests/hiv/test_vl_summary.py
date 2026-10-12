@@ -4,10 +4,6 @@ Tests for VL Summary/Dashboard endpoints (6 routes).
 Each test mocks the corresponding service function imported by
 ``hiv.vl.controllers.vl_controller_summary`` and verifies a 200 response
 with the expected JSON shape.
-
-Note on auth: the application uses ``get_unverified_payload`` which never
-raises, so the API does **not** return 401 for missing tokens. The test
-suite intentionally does not assert a 401 contract.
 """
 import pytest
 from unittest.mock import patch

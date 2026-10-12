@@ -1,3 +1,5 @@
+import logging
+
 import requests
 from flask_restful import Resource, reqparse
 from auth.auth_service import (
@@ -11,10 +13,22 @@ from auth.auth_service import (
     save_user_log_service,
     update_last_login_service,
 )
-from flask_jwt_extended import jwt_required, get_jwt_identity, create_access_token
-from datetime import timedelta
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import jsonify, request
 from configs.paths import *
+from configs import paths as config_paths
+from utilities.webhook_verification import (
+    WebhookVerificationError,
+    verify_svix_signature,
+)
+
+logger = logging.getLogger(__name__)
+
+WEBHOOK_UNAUTHORIZED_BODY = {
+    "status": 401,
+    "error": "Unauthorized",
+    "message": "Invalid webhook signature",
+}
 # from configs.paths_local import *
 
 
@@ -27,13 +41,11 @@ def _error_response(status: int, error: str, message: str):
     return jsonify({"status": status, "error": error, "message": message})
 
 
-def _success_response(message: str, data: dict = None, token: str = None):
-    """Create a standardized success response."""
+def _success_response(message: str, data: dict = None):
+    """Create a standardized success response (never carries a token)."""
     response = {"status": 200, "message": message}
     if data is not None:
         response["data"] = data
-    if token is not None:
-        response["token"] = token
     return jsonify(response)
 
 
@@ -96,22 +108,6 @@ def _save_log_silent(log_args: dict):
         save_user_log_service(log_args)
     except Exception:
         pass
-
-
-def _create_user_access_token(user, expires_hours: int = 1) -> str:
-    """Create access token for a user."""
-    return create_access_token(
-        identity=user.user_id,
-        additional_claims={
-            "user_name": user.user_name,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "role": user.role,
-            "user_id": user.user_id,
-            "email_address": user.email,
-        },
-        expires_delta=timedelta(hours=expires_hours),
-    )
 
 
 # =============================================================================
@@ -309,6 +305,11 @@ class user_create_controller(Resource):
 class clerk_user_controller(Resource):
     """
     Controller to handle Clerk webhook events for user authentication.
+
+    Every request must carry a valid Svix signature made with
+    ``CLERK_WEBHOOK_SECRET_KEY``; anything else gets a fixed 401 before the
+    payload is parsed. Responses never include an access token: Clerk is the
+    caller and ignores the body. API tokens come only from ``/auth/login``.
     """
 
     # Event handler mapping
@@ -332,12 +333,24 @@ class clerk_user_controller(Resource):
                 description: Returns a success message webhook is received.
             400:
                 description: Invalid Parameters
+            401:
+                description: Missing or invalid Svix signature
             403:
                 description: Forbidden
             500:
                 description: An Error Occurred
         """
-        data = request.get_json()
+        try:
+            verify_svix_signature(
+                request.headers,
+                request.get_data(),
+                config_paths.CLERK_WEBHOOK_SECRET_KEY,
+            )
+        except WebhookVerificationError as exc:
+            logger.warning("Rejected Clerk webhook: %r", exc)
+            return WEBHOOK_UNAUTHORIZED_BODY, 401
+
+        data = request.get_json(silent=True)
 
         if not data:
             return _error_response(400, "Bad Request", "Invalid payload")
@@ -378,7 +391,7 @@ class clerk_user_controller(Resource):
         log_args = _build_log_args(user_id, log_type, event, "auth_controller.clerk_webhook", user_data)
         _save_log_silent(log_args)
 
-        return _success_response(logout.get("message"), logout.get("data"), logout.get("token"))
+        return _success_response(logout.get("message"), logout.get("data"))
 
     def _handle_session_created(self, data: dict):
         """Handle session.created event - login existing user or create new user."""
@@ -399,8 +412,7 @@ class clerk_user_controller(Resource):
             return self._create_new_user_from_clerk(user_id, clerk_data)
 
     def _login_existing_user(self, user, data: dict):
-        """Login an existing user and return access token."""
-        access_token = _create_user_access_token(user)
+        """Record a Clerk login for an existing user (no token is issued)."""
         update_last_login_service(user.user_id)
 
         user_data = {
@@ -436,7 +448,6 @@ class clerk_user_controller(Resource):
                 "email_address": user.email,
                 "role": user.role,
             },
-            access_token
         )
 
     def _create_new_user_from_clerk(self, user_id: str, clerk_data: dict):
@@ -456,7 +467,7 @@ class clerk_user_controller(Resource):
         )
         _save_log_silent(log_args)
 
-        return _success_response(user_create.get("message"), user_create.get("data"), user_create.get("token"))
+        return _success_response(user_create.get("message"), user_create.get("data"))
 
     def _handle_user_created(self, data: dict):
         """Handle user.created event."""
@@ -491,7 +502,7 @@ class clerk_user_controller(Resource):
         )
         _save_log_silent(log_args)
 
-        return _success_response(user_update.get("message"), user_update.get("data"), user_update.get("token"))
+        return _success_response(user_update.get("message"), user_update.get("data"))
 
     def _handle_user_deleted(self, data: dict):
         """Handle user.deleted event."""
@@ -506,4 +517,4 @@ class clerk_user_controller(Resource):
         )
         _save_log_silent(log_args)
 
-        return _success_response(deleted.get("message"), deleted.get("data"), deleted.get("token"))
+        return _success_response(deleted.get("message"), deleted.get("data"))
