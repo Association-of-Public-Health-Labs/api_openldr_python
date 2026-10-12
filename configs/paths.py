@@ -78,24 +78,61 @@ CLERK_API_URL = get_config("Clerk", "api_endpoint", "CLERK_API_URL")
 CLERK_JWTS_URL = get_config("Clerk", "clerk_jwts_url", "CLERK_JWTS_URL")
 CLERK_ISSUER = get_config("Clerk", "clerk_issuer", "CLERK_ISSUER")
 CLERK_PUBLIC_KEY = get_config("Clerk", "clerk_public_key", "CLERK_PUBLIC_KEY")
+# Optional comma-separated list of origins allowed in a Clerk token's ``azp``
+# claim (e.g. "https://tb.openldr.org.mz,https://vl.openldr.org.mz").
+# Empty means the azp claim is not checked.
+CLERK_AUTHORIZED_PARTIES = get_config(
+    "Clerk", "clerk_authorized_parties", "CLERK_AUTHORIZED_PARTIES"
+)
+
+
+# -----------------------------
+# SQL Server / ODBC
+# -----------------------------
+SQL_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
+SQL_ODBC_POOLING = os.getenv("SQL_ODBC_POOLING", "true").strip().lower()
+
+
+def build_odbc_connection_string(user, pwd, host, db):
+    options = [
+        f"DRIVER={{{SQL_ODBC_DRIVER}}}",
+        f"SERVER={host}",
+        f"DATABASE={db}",
+        f"UID={user}",
+        f"PWD={pwd}",
+        "Encrypt=yes",
+        "TrustServerCertificate=yes",
+        "Connection Timeout=30",
+        "MARS_Connection=No",
+        "APP=OpenLDR API",
+    ]
+
+    if SQL_ODBC_POOLING in {"0", "false", "no", "off"}:
+        options.append("Pooling=No")
+
+    return ";".join(options) + ";"
+
+
+SQL_CONNECTION_OPTIONS = {
+    "driver": SQL_ODBC_DRIVER,
+    "Encrypt": "yes",
+    "TrustServerCertificate": "yes",
+    "Connection Timeout": "30",
+    "MARS_Connection": "No",
+    "APP": "OpenLDR API",
+    "Pooling": "No" if SQL_ODBC_POOLING in {"0", "false", "no", "off"} else "Default",
+}
 
 
 # -----------------------------
 # SQLAlchemy URL Builder
 # -----------------------------
-def make_url(user, pwd, host, db): 
+def make_url(user, pwd, host, db):
+    connection_string = build_odbc_connection_string(user, pwd, host, db)
+
     return URL.create(
         "mssql+pyodbc",
-        username=user,
-        password=pwd,
-        host=host,
-        database=db,
-        query={
-            "driver": "ODBC Driver 18 for SQL Server",
-            "Encrypt": "yes",
-            "TrustServerCertificate": "yes",
-            "Connection Timeout": "30",
-        }
+        query={"odbc_connect": connection_string},
     )
 
 

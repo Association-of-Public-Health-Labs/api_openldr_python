@@ -152,11 +152,39 @@ Key query builder helpers used across all modules:
 
 ## Authentication
 
-- JWT tokens via Flask-JWT-Extended
-- Token expiry: 60 minutes
-- Clerk integration for social auth (webhooks)
-- Role-based access: Admin and User roles
-- All reporting endpoints require `@jwt_required()`
+- Every reporting endpoint authenticates through
+  `utilities.controller_helpers.authenticate_request()`, which calls
+  `utilities.token_verification.verify_bearer_token()`. Accepted tokens:
+  - **Clerk session tokens** (RS256) from the dashboards — verified against
+    `CLERK_JWTS_URL` (JWKS, cached; unknown `kid` refetched at most every 60 s),
+    `CLERK_ISSUER`, expiry, and `CLERK_AUTHORIZED_PARTIES` (`azp`) when set.
+  - **API login tokens** (HS256) from `POST /auth/login` — verified with the
+    Flask/JWT secret; 60 min expiry.
+- Anything else → HTTP 401 `{"status": "error", "code": 401, "message": "Invalid or missing token"}`.
+  The reason is logged, never returned.
+- If `CLERK_ISSUER` or `CLERK_JWTS_URL` is empty, all Clerk tokens are rejected
+  (fail closed). Before changing Clerk config, check a real dashboard token
+  with the target config (the token lives ~60 s, so run it right after copying;
+  it is never printed):
+  - bash: `python -m tools.check_clerk_token < token.txt`
+  - PowerShell: `python -m tools.check_clerk_token token.txt`
+    (or `Get-Content token.txt | python -m tools.check_clerk_token`)
+
+  The tool also prints a "diagnostic (unverified)" clock offset (host time minus
+  token `iat`); a large or negative value means the host clock is off
+  (`w32tm /query /status`).
+- On Windows the authorized-parties key is `[Clerk] clerk_authorized_parties` in `configs/configs.ini`.
+- HS256 API tokens are rejected outright if the effective secret
+  (`JWT_SECRET_KEY`, else `SECRET_KEY` from `FLASK_SECRET_KEY` /
+  `[Flask] secret_key`) is unset, the default `"default-secret-key"`, or shorter
+  than 32 bytes.
+- API tokens come **only** from `POST /auth/login`. `POST /auth/clerk` is the
+  Clerk webhook: every request must carry a valid Svix signature
+  (`utilities/webhook_verification.py`, 5 min timestamp tolerance) and it never
+  returns a token. `CLERK_WEBHOOK_SECRET_KEY` (`[Clerk] clerk_webhook_secret` on
+  Windows) must equal the signing secret (`whsec_...`) of the Clerk webhook
+  endpoint, otherwise the webhook rejects everything with 401.
+- Role-based access: Admin and User roles (`utilities/auth_helpers.py`).
 
 ## Running Locally
 
@@ -277,9 +305,9 @@ Request flow: `HTTP → routes.py → controller (reqparse) → service (SQLAlch
 ### Authentication
 
 - JWT tokens via `flask-jwt-extended`, 60-minute expiration
-- Tokens obtained via `POST /auth/login`
+- Tokens obtained only via `POST /auth/login` (the `/auth/clerk` webhook never returns tokens)
 - Role-based access: `Admin` role has elevated privileges in some endpoints
-- Token user info extracted in services using `get_user_token_info()` from `utilities/utils.py`
+- Verified token claims are mapped to `session['user_info']` by `get_user_token_info()` in `authenticate_request()`; see the Authentication section above.
 
 ### Common API Parameters
 

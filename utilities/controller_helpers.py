@@ -34,11 +34,12 @@ Usage example::
 from flask import request, session
 from flask_restful import reqparse
 
-from utilities.utils import (
-    get_token,
-    get_unverified_payload,
-    get_user_token_info,
-)
+import logging
+
+from utilities.token_verification import TokenVerificationError, verify_bearer_token
+from utilities.utils import get_token, get_user_token_info
+
+logger = logging.getLogger(__name__)
 
 # Argument definition reused for all "list-like" query parameters that may
 # appear multiple times in the URL (e.g. ?province=A&province=B).
@@ -99,9 +100,21 @@ def error_response(exc, message="An error occurred", code=500):
     )
 
 
+def unauthorized_response():
+    """Fixed 401 payload. Never include the verification failure reason."""
+    return (
+        {
+            "status": "error",
+            "code": 401,
+            "message": "Invalid or missing token",
+        },
+        401,
+    )
+
+
 def authenticate_request():
     """
-    Validate the incoming request's JWT and populate ``session['user_info']``.
+    Verify the signature of the incoming request's JWT and populate ``session['user_info']``.
 
     Returns
     -------
@@ -111,12 +124,13 @@ def authenticate_request():
         ``None`` and ``error_response`` is a Flask response ready to be
         returned from the endpoint.
     """
-    token = get_token(request) or "Unknown"
+    token = get_token(request)
 
     try:
-        token_payload = get_unverified_payload(token)
-    except Exception as exc:
-        return None, error_response(exc, "Invalid or missing token")
+        token_payload = verify_bearer_token(token)
+    except TokenVerificationError as exc:
+        logger.warning("Rejected token on %s: %r", request.path, str(exc))
+        return None, unauthorized_response()
 
     session["user_info"] = get_user_token_info(token_payload)
     user_id = str(session["user_info"].get("user_id"))

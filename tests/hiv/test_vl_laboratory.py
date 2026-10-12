@@ -139,10 +139,6 @@ class TestVlLaboratoryEndpoints:
             assert isinstance(data, list)
             assert len(data) > 0
 
-    # Note: the application uses ``get_unverified_payload`` which never
-    # raises, so the API does not enforce 401 on missing tokens. We do not
-    # assert that contract here.
-
 
 class TestVlRegisteredSamplesResponse:
     """Test response structure for registered_samples endpoint."""

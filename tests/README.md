@@ -98,8 +98,7 @@ Important rules:
 1. **Patch the symbol where it is used** (the controller module), not where
    it is defined. `vl_controller_facility.facility_registered_samples_service`,
    not `hiv.vl.services.vl_services_facilities.facility_registered_samples_service`.
-2. The auth layer uses `get_unverified_payload` and never raises on missing
-   tokens, so do **not** assert a 401 contract.
+2. Every reporting endpoint verifies the bearer token and returns 401 {"status": "error", "code": 401, "message": "Invalid or missing token"} when it is missing or untrusted. Use the auth_headers fixture for authenticated calls; tests/test_auth_enforcement.py covers the 401 contract.
 3. Patient endpoints return a paginated envelope
    (`status / page / per_page / total_count / total_pages / data`), all
    other endpoints return a list (or, in a couple of summary cases, a
@@ -114,5 +113,3 @@ Important rules:
   `unittest.mock.patch` could not find `X` on the controller module. The
   service was probably renamed or is imported under a different name; open
   the controller and copy the actual import.
-- **Tests pass but you expected a 401** — this is by design, see the auth
-  note above.

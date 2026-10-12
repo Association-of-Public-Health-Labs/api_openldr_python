@@ -31,7 +31,7 @@ def app():
     }
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = "test-secret-key"
-    app.config["JWT_SECRET_KEY"] = "test-jwt-secret"
+    app.config["JWT_SECRET_KEY"] = "test-jwt-secret-at-least-32-bytes-long"
 
     jwt = JWTManager(app)
     db.init_app(app)
@@ -42,10 +42,12 @@ def app():
     from hiv.vl.routes import vl_routes
     from hiv.eid.routes import eid_routes
     from tb.gxpert.routes import tb_gxpert_routes
+    from auth.routes import authentication_routes
 
     vl_routes(api)
     eid_routes(api)
     tb_gxpert_routes(api)
+    authentication_routes(api)
 
     with app.app_context():
         db.create_all()

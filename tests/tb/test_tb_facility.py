@@ -161,9 +161,6 @@ class TestTbFacilityEndpoints:
             assert isinstance(data, list)
             assert len(data) > 0
 
-    # Note: the application uses ``get_unverified_payload`` which never
-    # raises, so the API does not enforce 401 on missing tokens.
-
 
 class TestTbFacilityRegisteredSamplesResponse:
     """Test response structure for facility registered_samples endpoint."""

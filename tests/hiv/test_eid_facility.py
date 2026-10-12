@@ -125,9 +125,6 @@ class TestEidFacilityEndpoints:
             assert isinstance(data, list)
             assert len(data) > 0
 
-    # Note: the application uses ``get_unverified_payload`` which never
-    # raises, so the API does not enforce 401 on missing tokens.
-
 
 class TestEidFacilityTestedSamplesResponse:
     """Test response structure for facility tested_samples endpoint."""
