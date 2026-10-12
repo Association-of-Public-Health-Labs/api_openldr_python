@@ -341,6 +341,10 @@ class VlFacilityRejectedSamplesByMonth(Resource):
         ---
         tags:
             - HIV Viral Load/Facilities
+        description: >
+            ✱ Counts a sample when either rejection code is set and includes the
+            whole end day. The legacy API required both codes and dropped most of
+            the end day.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -368,6 +372,10 @@ class VlFacilityRejectedSamplesByFacility(Resource):
         ---
         tags:
             - HIV Viral Load/Facilities
+        description: >
+            ✱ Counts a sample when either rejection code is set and includes the
+            whole end day. The legacy API required both codes and dropped most of
+            the end day.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -395,6 +403,10 @@ class VlFacilityTatByMonth(Resource):
         ---
         tags:
             - HIV Viral Load/Facilities
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -422,6 +434,10 @@ class VlFacilityTatByFacility(Resource):
         ---
         tags:
             - HIV Viral Load/Facilities
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'

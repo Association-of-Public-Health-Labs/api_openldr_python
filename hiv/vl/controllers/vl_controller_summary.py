@@ -108,6 +108,10 @@ class VlSummaryTatByMonth(Resource):
         ---
         tags:
             - HIV Viral Load/Summary
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'

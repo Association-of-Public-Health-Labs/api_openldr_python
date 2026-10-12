@@ -59,7 +59,7 @@ api_openldr_python/
 │   └── cultura/                # TB Culture (placeholder)
 │
 └── hiv/                        # HIV module
-    ├── vl/                     # Viral Load (partially implemented)
+    ├── vl/                     # Viral Load
     │   ├── routes.py           # Currently 1 endpoint
     │   ├── models/             # vl.py (VlData - 150+ columns)
     │   ├── controllers/        # laboratory, facilities, summary
@@ -132,13 +132,47 @@ Configured in `configs/paths.py`. Each bind connects to a separate SQL Server da
 
 | Bind Key | Purpose |
 |----------|---------|
-| `vlSMS` | HIV Viral Load SMS data |
 | `vl` | HIV Viral Load data |
 | `dpi` | HIV Early Infant Diagnosis (EID/DPI) |
 | `ad` | HIV Advanced Diseases |
 | `tb` | TB GeneXpert data |
 | `dict` | Dictionary (facilities, laboratories) |
 | `users` | User authentication data |
+| `reportData` | Weekly VL lab reports (ReportData.Resume) |
+
+## VL parity with the legacy API
+
+The `hiv/vl/*` endpoints reproduce the numbers of the legacy Node API
+(`openldr-backend`) that `cargaviral.openldr.org.mz` used. All counting rules
+live in `hiv/vl/services/vl_common.py`. `tools/vl_parity_check.py` compares
+both APIs on real data.
+
+Deliberate differences from Node (✱):
+
+| ✱ | Endpoints | Node | Python |
+|---|---|---|---|
+| Rejection codes | `facilities/rejected_samples_by_month/`, `facilities/rejected_samples_by_facility/` | Both `LIMSRejectionCode` and `HIVVL_LIMSRejectionCode` non-empty (AND) | Either non-empty (OR), like the lab and summary endpoints |
+| Rejection window | same two endpoints | `RegisteredDatetime BETWEEN start AND end` (end day excluded after midnight) | `CAST(RegisteredDateTime AS DATE)` between start and end, both days included |
+| TAT 90-day cap | every TAT endpoint | Intended a `< 90` days cap, but a duplicate object key dropped it | No cap, so the same numbers as Node actually produced |
+
+Kept on purpose, for parity:
+- Every other date filter is `col BETWEEN 'start' AND 'end'` on bare dates, so the end day counts only rows at midnight.
+- TAT averages are integer `AVG(DATEDIFF(day, ...))`, so they truncate.
+- `tested_samples`, `tat_by_lab` and `tat_by_month` (laboratories) default to `TestingFacilityCode LIKE 'P%'` when no `lab_code` or location filter is given. `tested_samples_by_month` and the rejection endpoints have no default.
+- Facility endpoints exclude `RequestingProvinceName` NULL or `'null'` when no location is given, except `tested_samples_by_month` and `tested_samples_by_gender_by_month`.
+
+VL-specific parameters: `lab_code` (repeatable or CSV), `age_range=min,max`.
+Patient searches also take `province`, `district`, `pregnant`, `breastfeeding`,
+`rejected`, `result_type` and `per_page` (maximum 500).
+
+New endpoints:
+- `summary/tat_vs_disalinks/`: static file `hiv/vl/data/tat_vs_disalinks.json`.
+- `laboratories/weekly_report/` and `laboratories/weekly_report_national/`: ReportData `Resume`, bind `reportData`, env `DB_REPORT_DATA`.
+- `facilities/tested_samples_pregnant_by_facility/` and `facilities/tested_samples_breastfeeding_by_facility/`.
+
+Errors: services return `{"status": "error", "code": N}` and
+`run_reporting_endpoint` sends HTTP N. 5xx bodies never include exception
+text, and `InvalidParameter` gives a 400.
 
 ## Utility Functions (utilities/utils.py)
 
@@ -256,7 +290,7 @@ All required variables must be set before running:
 | `DB_USER` / `DB_PASSWORD` | SQL Server credentials (shared across all DBs) |
 | `LOCAL_DOMAIN` / `CDR_DOMAIN` / `CLOUD_DOMAIN` | SQL Server hostnames per environment |
 | `TB_DASHBOARD_DOMAIN` | TB dashboard server |
-| `DB_VL_DATA`, `DB_VL_SMS`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS` | Database names |
+| `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS`, `DB_REPORT_DATA` | Database names |
 
 The active environment binding is selected in `app.py` by assigning one of the three `SQLALCHEMY_BINDS_*` dicts from `configs/paths.py` to `app.config["SQLALCHEMY_BINDS"]`.
 
@@ -292,7 +326,7 @@ Request flow: `HTTP → routes.py → controller (reqparse) → service (SQLAlch
 ### Module Structure
 
 - `tb/gxpert/` — TB GeneXpert (most complete; 40+ endpoints across facility, laboratory, summary controllers)
-- `hiv/vl/` — HIV Viral Load (only 1 endpoint implemented)
+- `hiv/vl/` — HIV Viral Load (laboratory, facility, summary, weekly and patient endpoints; parity with the legacy Node API)
 - `hiv/ad/` — HIV Additional tests (CD4, CRAG, TBLAM; partially implemented)
 - `dict/` — Reference data (laboratories and facilities, filterable by province/district)
 - `auth/` — JWT authentication, user CRUD, login/logout logging

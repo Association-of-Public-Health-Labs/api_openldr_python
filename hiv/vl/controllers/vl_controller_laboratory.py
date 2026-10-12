@@ -348,6 +348,10 @@ class VlTatByLab(Resource):
         ---
         tags:
             - HIV Viral Load/Laboratories
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -374,6 +378,10 @@ class VlTatByMonth(Resource):
         ---
         tags:
             - HIV Viral Load/Laboratories
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
