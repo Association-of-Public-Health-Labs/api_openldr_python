@@ -965,22 +965,34 @@ The token is valid for about 60 seconds, so the next step must be run immediatel
 
 - [ ] **Step 3: User runs the check with the production config**
 
-On the production API host (Windows/Waitress, `configs/configs.ini`) or with identical settings, from a checkout of this branch:
+On the production API host (Windows/Waitress, `configs/configs.ini`) or with identical settings, from a checkout of this branch. PowerShell does not support `<` redirection, so pass the file as an argument:
 
-```bash
-python -m tools.check_clerk_token < token.txt
+```powershell
+python -m tools.check_clerk_token token.txt
+# or: Get-Content token.txt | python -m tools.check_clerk_token
 ```
+
+(bash equivalent: `python -m tools.check_clerk_token < token.txt`.)
 
 Expected: `VERIFIED`, with `iss` equal to the printed `CLERK_ISSUER` and `azp` equal to `https://tb.openldr.org.mz`.
 - **If `REJECTED: invalid Clerk token: Invalid issuer`:** production `CLERK_ISSUER` does not match the Clerk instance the dashboards use. Fix `configs.ini` (`[Clerk] clerk_issuer`, `clerk_jwts_url`) to the dashboard's instance, then re-run. **Do not merge until this prints VERIFIED.**
 - **If `REJECTED: unknown signing key`:** `CLERK_JWTS_URL` points at a different instance; fix it the same way.
+- Note the `diagnostic (unverified): clock offset ... = N s` line; it is used in Step 5.
 - Delete `token.txt` afterwards.
 
 - [ ] **Step 4: Decide on `CLERK_AUTHORIZED_PARTIES`**
 
 Recommend the production value `https://tb.openldr.org.mz` (add `https://vl.openldr.org.mz` once piece 3 deploys the VL app), set under `[Clerk] clerk_authorized_parties` in `configs.ini`. Re-run step 3 after setting it. Leaving it empty is acceptable but weaker.
 
-- [ ] **Step 5: Open the PR against `dev`**
+- [ ] **Step 5: Confirm production secrets and host clock (gate)**
+
+All three must hold before opening the PR. The user checks them on the production host; never paste secret values into the chat.
+
+1. **API/JWT secret:** the production Flask secret (`[Flask] secret_key` / `FLASK_SECRET_KEY`, which becomes `SECRET_KEY`; `JWT_SECRET_KEY` if set takes precedence) is set, is **not** `default-secret-key`, and is at least 32 bytes. Otherwise every `/auth/login` token is rejected after deploy (fail closed). Changing it invalidates outstanding API tokens.
+2. **Clerk webhook secret:** `[Clerk] clerk_webhook_secret` / `CLERK_WEBHOOK_SECRET_KEY` equals the signing secret (`whsec_...`) of the Clerk webhook endpoint that points at `/auth/clerk` (Clerk dashboard → Webhooks → endpoint → Signing Secret). If it is empty or wrong, every webhook delivery gets 401. After deploy, check that Clerk's webhook dashboard shows 2xx deliveries for that endpoint.
+3. **Host clock:** run `w32tm /query /status` on the production host and confirm it is synchronised; the clock offset printed by the tool in Step 3 should be within a few seconds (Clerk tokens live ~60 s and verification allows only 5 s leeway; the webhook allows 5 min).
+
+- [ ] **Step 6: Open the PR against `dev`**
 
 ```bash
 gh pr create --repo Association-of-Public-Health-Labs/api_openldr_python \
@@ -991,16 +1003,20 @@ gh pr create --repo Association-of-Public-Health-Labs/api_openldr_python \
 - `authenticate_request()` decoded bearer tokens **without verifying the signature**, so a forged token with an Admin `user_id` could read patient data (TB and VL patients) and all reporting endpoints.
 - New `utilities/token_verification.py` verifies Clerk RS256 tokens (JWKS cache, issuer, expiry, optional `azp`) and API HS256 tokens; everything else returns a fixed 401.
 - Removes the unverified decoder, unused Clerk helpers and the dead `execute_tb_service`.
-- Adds `tools/check_clerk_token.py` for a pre-deploy check, plus docs.
+- `POST /auth/clerk` (Clerk webhook) had **no signature verification** and returned a real API access token to any caller on `session.created` (and let anyone update/delete users). It now verifies the Svix signature (`utilities/webhook_verification.py`, stdlib HMAC, 5 min tolerance, fail closed without `CLERK_WEBHOOK_SECRET_KEY`) and never returns a token; API tokens come only from `POST /auth/login`.
+- API HS256 tokens are rejected if the JWT/Flask secret is unset, the public default, or shorter than 32 bytes.
+- Adds `tools/check_clerk_token.py` for a pre-deploy check (file argument for PowerShell, clock-offset diagnostic), plus docs.
 
 ## Deploy checklist
-- [ ] `python -m tools.check_clerk_token < token.txt` prints VERIFIED on the production config (token from tb.openldr.org.mz)
+- [ ] `python -m tools.check_clerk_token token.txt` prints VERIFIED on the production config (token from tb.openldr.org.mz); clock offset within a few seconds (`w32tm /query /status`)
+- [ ] Production Flask/JWT secret set, not `default-secret-key`, ≥ 32 bytes
+- [ ] `[Clerk] clerk_webhook_secret` equals the signing secret of the Clerk webhook endpoint for `/auth/clerk`; after deploy, Clerk's webhook dashboard shows 2xx deliveries
 - [ ] `[Clerk] clerk_authorized_parties` set (recommended: `https://tb.openldr.org.mz`)
 - [ ] After deploy: tb.openldr.org.mz loads all pages; a request without a token returns 401
 - Rollback: redeploy the previous commit of `dev`.
 
 ## Test plan
-- [x] `python3 -m pytest -q`: 338 passed (59 new: verifier, endpoint 401 contract, header parsing, check tool)
+- [x] `python3 -m pytest -q`: 402 passed (123 new: token verifier, endpoint 401 contract and Clerk acceptance, header parsing, weak-secret rejection, Svix webhook verification and no-token responses, check tool)
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -1010,10 +1026,10 @@ EOF
 If `gh pr create` fails with "Head sha can't be blank" (a stale remote URL after a repo transfer), use:
 `gh api -X POST repos/Association-of-Public-Health-Labs/api_openldr_python/pulls -f head=security/verify-jwt-signatures -f base=dev -f title="…" -f body="…"`.
 
-- [ ] **Step 6: Report back to the user**
+- [ ] **Step 7: Report back to the user**
 
 Report:
 - the PR URL
 - the test count
-- the token-check result
+- the token-check result and the Step 5 gate results (secret strength, webhook secret, clock offset)
 - the remaining deploy-checklist items, which are the user's to tick off after merging and deploying (production is the Windows Waitress service managed by NSSM)
