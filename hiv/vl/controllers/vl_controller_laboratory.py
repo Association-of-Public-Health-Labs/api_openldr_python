@@ -1,5 +1,9 @@
 from flask_restful import Resource
 
+from hiv.vl.services.vl_services_weekly import (
+    weekly_report_service,
+    weekly_report_national_service,
+)
 from hiv.vl.services.vl_services_laboratory import (
     registered_samples_service,
     registered_samples_by_month_service,
@@ -18,13 +22,14 @@ from hiv.vl.services.vl_services_laboratory import (
     suppression_service,
 )
 from utilities.controller_helpers import (
+    VL_FILTER_ARGS,
     build_common_parser,
     run_reporting_endpoint,
 )
 
 
 # Shared parser for all VL laboratory endpoints.
-_parser = build_common_parser()
+_parser = build_common_parser(extra_args=VL_FILTER_ARGS)
 
 
 def _endpoint(service):
@@ -96,6 +101,7 @@ class VlTestedSamples(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Tested samples by laboratory
@@ -121,6 +127,7 @@ class VlTestedSamplesByMonth(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Tested samples by month
@@ -296,9 +303,10 @@ class VlRejectedSamples(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
-                description: Rejected samples by laboratory
+                description: Rejected samples per lab code: lab_code, testing_facility (dictionary LabName), total
             401:
                 description: Missing or invalid JWT token
             500:
@@ -321,6 +329,7 @@ class VlRejectedSamplesByMonth(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Rejected samples by month
@@ -339,6 +348,10 @@ class VlTatByLab(Resource):
         ---
         tags:
             - HIV Viral Load/Laboratories
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -346,6 +359,7 @@ class VlTatByLab(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Turnaround time by laboratory
@@ -364,6 +378,10 @@ class VlTatByMonth(Resource):
         ---
         tags:
             - HIV Viral Load/Laboratories
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -371,6 +389,7 @@ class VlTatByMonth(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: Turnaround time by month
@@ -405,3 +424,55 @@ class VlSuppression(Resource):
                 description: An Error Occurred
         """
         return _endpoint(suppression_service)
+
+
+class VlWeeklyReport(Resource):
+    def get(self):
+        """
+        Retrieve the weekly lab report (one row per lab and week)
+        ---
+        tags:
+            - HIV Viral Load/Laboratories
+        description: >
+            Read from ReportData.Resume. Filters on the week's start date, both
+            ends inclusive. Default window: the current Sunday-Saturday week.
+        parameters:
+            - $ref: '#/parameters/IntervalDates'
+            - $ref: '#/parameters/LabCodeParameter'
+        responses:
+            200:
+                description: lab_code, lab_name, week, start, end, backlogs, tests, registrations, rejections, capacity, tat
+            400:
+                description: Invalid interval_dates
+            401:
+                description: Missing or invalid JWT token
+            500:
+                description: An Error Occurred
+        """
+        return _endpoint(weekly_report_service)
+
+
+class VlWeeklyReportNational(Resource):
+    def get(self):
+        """
+        Retrieve the national weekly report (one row per week)
+        ---
+        tags:
+            - HIV Viral Load/Laboratories
+        description: >
+            Read from ReportData.Resume, summed over labs (tat is the mean of
+            the lab TATs). Default window: the last 12 weeks.
+        parameters:
+            - $ref: '#/parameters/IntervalDates'
+            - $ref: '#/parameters/LabCodeParameter'
+        responses:
+            200:
+                description: week, start, end, backlogs, tests, registrations, rejections, capacity, tat
+            400:
+                description: Invalid interval_dates
+            401:
+                description: Missing or invalid JWT token
+            500:
+                description: An Error Occurred
+        """
+        return _endpoint(weekly_report_national_service)

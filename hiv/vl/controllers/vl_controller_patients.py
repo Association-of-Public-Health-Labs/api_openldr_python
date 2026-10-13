@@ -9,6 +9,7 @@ from hiv.vl.services.vl_services_patients import (
 from utilities.controller_helpers import (
     LIST_ARG,
     STR_ARG,
+    VL_PATIENT_FILTER_ARGS,
     build_common_parser,
     run_reporting_endpoint,
 )
@@ -29,6 +30,7 @@ _parser = build_common_parser(
         ("test_reason", LIST_ARG),
         ("page", {"type": int, "location": "args", "default": 1}),
         ("per_page", {"type": int, "location": "args", "default": 50}),
+        *VL_PATIENT_FILTER_ARGS,
     ]
 )
 
@@ -68,14 +70,22 @@ class VlPatientsByName(Resource):
               type: integer
               required: false
               default: 50
-              description: Number of records per page
+              description: Records per page (default 50, maximum 500)
+            - $ref: '#/parameters/ProvinceParameter'
+            - $ref: '#/parameters/DistrictParameter'
+            - $ref: '#/parameters/LabCodeParameter'
+            - $ref: '#/parameters/AgeRangeParameter'
+            - $ref: '#/parameters/PregnantParameter'
+            - $ref: '#/parameters/BreastfeedingParameter'
+            - $ref: '#/parameters/RejectedParameter'
+            - $ref: '#/parameters/DateBasisParameter'
         responses:
             200:
                 description: A List of VL Patients matching the name criteria.
             400:
-                description: Invalid Parameters
+                description: Invalid or missing filter
             403:
-                description: Forbidden
+                description: Admin only
             500:
                 description: An Error Occurred
         """
@@ -103,14 +113,22 @@ class VlPatientsByFacility(Resource):
               type: integer
               required: false
               default: 50
-              description: Number of records per page
+              description: Records per page (default 50, maximum 500)
+            - $ref: '#/parameters/ProvinceParameter'
+            - $ref: '#/parameters/DistrictParameter'
+            - $ref: '#/parameters/LabCodeParameter'
+            - $ref: '#/parameters/AgeRangeParameter'
+            - $ref: '#/parameters/PregnantParameter'
+            - $ref: '#/parameters/BreastfeedingParameter'
+            - $ref: '#/parameters/RejectedParameter'
+            - $ref: '#/parameters/DateBasisParameter'
         responses:
             200:
                 description: A List of VL Patients registered at the facility.
             400:
-                description: Invalid Parameters
+                description: Invalid or missing filter
             403:
-                description: Forbidden
+                description: Admin only
             500:
                 description: An Error Occurred
         """
@@ -146,14 +164,22 @@ class VlPatientsByResultType(Resource):
               type: integer
               required: false
               default: 50
-              description: Number of records per page
+              description: Records per page (default 50, maximum 500)
+            - $ref: '#/parameters/ProvinceParameter'
+            - $ref: '#/parameters/DistrictParameter'
+            - $ref: '#/parameters/LabCodeParameter'
+            - $ref: '#/parameters/AgeRangeParameter'
+            - $ref: '#/parameters/PregnantParameter'
+            - $ref: '#/parameters/BreastfeedingParameter'
+            - $ref: '#/parameters/RejectedParameter'
+            - $ref: '#/parameters/DateBasisParameter'
         responses:
             200:
                 description: A List of VL Patients filtered by result type.
             400:
-                description: Invalid Parameters
+                description: Invalid or missing filter
             403:
-                description: Forbidden
+                description: Admin only
             500:
                 description: An Error Occurred
         """
@@ -182,14 +208,22 @@ class VlPatientsByTestReason(Resource):
               type: integer
               required: false
               default: 50
-              description: Number of records per page
+              description: Records per page (default 50, maximum 500)
+            - $ref: '#/parameters/ProvinceParameter'
+            - $ref: '#/parameters/DistrictParameter'
+            - $ref: '#/parameters/LabCodeParameter'
+            - $ref: '#/parameters/AgeRangeParameter'
+            - $ref: '#/parameters/PregnantParameter'
+            - $ref: '#/parameters/BreastfeedingParameter'
+            - $ref: '#/parameters/RejectedParameter'
+            - $ref: '#/parameters/DateBasisParameter'
         responses:
             200:
                 description: A List of VL Patients filtered by test reason.
             400:
-                description: Invalid Parameters
+                description: Invalid or missing filter
             403:
-                description: Forbidden
+                description: Admin only
             500:
                 description: An Error Occurred
         """

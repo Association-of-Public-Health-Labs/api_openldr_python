@@ -12,19 +12,22 @@ from hiv.vl.services.vl_services_facilities import (
     facility_tested_samples_by_test_reason_by_facility_service,
     facility_tested_samples_pregnant_service,
     facility_tested_samples_breastfeeding_service,
+    facility_tested_samples_pregnant_by_facility_service,
+    facility_tested_samples_breastfeeding_by_facility_service,
     facility_rejected_samples_by_month_service,
     facility_rejected_samples_by_facility_service,
     facility_tat_by_month_service,
     facility_tat_by_facility_service,
 )
 from utilities.controller_helpers import (
+    VL_FILTER_ARGS,
     build_common_parser,
     run_reporting_endpoint,
 )
 
 
 # Shared parser for all VL facility endpoints.
-_parser = build_common_parser()
+_parser = build_common_parser(extra_args=VL_FILTER_ARGS)
 
 
 def _endpoint(service):
@@ -51,6 +54,8 @@ class VlFacilityRegisteredSamples(Resource):
                 description: Registered samples by requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -76,6 +81,8 @@ class VlFacilityTestedSamplesByMonth(Resource):
                 description: Tested samples by month (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -101,6 +108,8 @@ class VlFacilityTestedSamplesByFacility(Resource):
                 description: Tested samples by requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -126,6 +135,8 @@ class VlFacilityTestedSamplesByGenderByMonth(Resource):
                 description: Tested samples by gender (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -151,6 +162,8 @@ class VlFacilityTestedSamplesByGenderByFacility(Resource):
                 description: Tested samples by gender and requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -171,11 +184,14 @@ class VlFacilityTestedSamplesByAgeByMonth(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/AgeRangeParameter'
         responses:
             200:
                 description: Tested samples by age group (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -196,11 +212,14 @@ class VlFacilityTestedSamplesByAgeByFacility(Resource):
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
+            - $ref: '#/parameters/AgeRangeParameter'
         responses:
             200:
                 description: Tested samples by age group and requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -226,6 +245,8 @@ class VlFacilityTestedSamplesByTestReasonByMonth(Resource):
                 description: Tested samples by test reason (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -251,6 +272,8 @@ class VlFacilityTestedSamplesByTestReasonByFacility(Resource):
                 description: Tested samples by test reason (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -276,6 +299,8 @@ class VlFacilityTestedSamplesPregnant(Resource):
                 description: Tested samples for pregnant women (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -301,6 +326,8 @@ class VlFacilityTestedSamplesBreastfeeding(Resource):
                 description: Tested samples for breastfeeding women (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -314,6 +341,10 @@ class VlFacilityRejectedSamplesByMonth(Resource):
         ---
         tags:
             - HIV Viral Load/Facilities
+        description: >
+            ✱ Counts a sample when either rejection code is set and includes the
+            whole end day. The legacy API required both codes and dropped most of
+            the end day.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -326,6 +357,8 @@ class VlFacilityRejectedSamplesByMonth(Resource):
                 description: Rejected samples by month (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -339,6 +372,10 @@ class VlFacilityRejectedSamplesByFacility(Resource):
         ---
         tags:
             - HIV Viral Load/Facilities
+        description: >
+            ✱ Counts a sample when either rejection code is set and includes the
+            whole end day. The legacy API required both codes and dropped most of
+            the end day.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -351,6 +388,8 @@ class VlFacilityRejectedSamplesByFacility(Resource):
                 description: Rejected samples by requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -364,6 +403,10 @@ class VlFacilityTatByMonth(Resource):
         ---
         tags:
             - HIV Viral Load/Facilities
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -376,6 +419,8 @@ class VlFacilityTatByMonth(Resource):
                 description: Turnaround time by month (facility)
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
@@ -389,6 +434,10 @@ class VlFacilityTatByFacility(Resource):
         ---
         tags:
             - HIV Viral Load/Facilities
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -401,7 +450,69 @@ class VlFacilityTatByFacility(Resource):
                 description: Turnaround time by requesting facility
             401:
                 description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
             500:
                 description: An Error Occurred
         """
         return _endpoint(facility_tat_by_facility_service)
+
+
+class VlFacilityTestedSamplesPregnantByFacility(Resource):
+    def get(self):
+        """
+        Retrieve tested samples for pregnant women per location
+        ---
+        tags:
+            - HIV Viral Load/Facilities
+        description: >
+            Pregnant in YES/Yes/yes/Sim/SIM/sim. Grouped by the facility_type /
+            disaggregation column, like the other *_by_facility endpoints.
+        parameters:
+            - $ref: '#/parameters/IntervalDates'
+            - $ref: '#/parameters/ProvinceParameter'
+            - $ref: '#/parameters/DistrictParameter'
+            - $ref: '#/parameters/HealthFacilityParameter'
+            - $ref: '#/parameters/FacilityType'
+            - $ref: '#/parameters/DisaggregationParameter'
+        responses:
+            200:
+                description: requesting_facility, total, suppressed, not_suppressed
+            401:
+                description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
+            500:
+                description: An Error Occurred
+        """
+        return _endpoint(facility_tested_samples_pregnant_by_facility_service)
+
+
+class VlFacilityTestedSamplesBreastfeedingByFacility(Resource):
+    def get(self):
+        """
+        Retrieve tested samples for breastfeeding women per location
+        ---
+        tags:
+            - HIV Viral Load/Facilities
+        description: >
+            BreastFeeding in YES/Yes/yes/Sim/SIM/sim. Grouped by the
+            facility_type / disaggregation column.
+        parameters:
+            - $ref: '#/parameters/IntervalDates'
+            - $ref: '#/parameters/ProvinceParameter'
+            - $ref: '#/parameters/DistrictParameter'
+            - $ref: '#/parameters/HealthFacilityParameter'
+            - $ref: '#/parameters/FacilityType'
+            - $ref: '#/parameters/DisaggregationParameter'
+        responses:
+            200:
+                description: requesting_facility, total, suppressed, not_suppressed
+            401:
+                description: Missing or invalid JWT token
+            403:
+                description: facility_type=health_facility requires an Admin
+            500:
+                description: An Error Occurred
+        """
+        return _endpoint(facility_tested_samples_breastfeeding_by_facility_service)

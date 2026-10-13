@@ -1,6 +1,7 @@
 from sqlalchemy import and_, or_, func, case, text
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from utilities.service_helpers import coerce_interval_dates
 from configs.paths import *
 
 # -----------------------------------------------------------------------------
@@ -1104,6 +1105,32 @@ def get_patients(
     return patiens
 
 
+VL_REASON_NOT_SPECIFIED = ("Não preenchido", "No", "Reason Not Specified", "Yes", "")
+VL_TREATMENT_FAILURE = ("Suspected treatment failure", "Suspeita de falha terapêutica")
+
+
+def _first_non_empty(*values):
+    """First value that is not None or blank, stripped; otherwise None."""
+    for value in values:
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def _vl_reason_for_test(value):
+    """Group the raw ReasonForTest values the way the dashboard shows them."""
+    reason = (value or "").strip()
+    if reason in VL_REASON_NOT_SPECIFIED:
+        return "Reason Not Specified"
+    if reason == "Routine":
+        return "Routine"
+    if reason in ("Repeat after breastfeeding", "Repeat"):
+        return "Repeat"
+    if reason in VL_TREATMENT_FAILURE:
+        return "Suspected treatment failure"
+    return None
+
+
 def process_patients(
     patiens, dates, facility_type, gx_result_type, test_type, month, year
 ):
@@ -1256,6 +1283,22 @@ def process_patients(
                 "age_in_years": patient.AgeInYears,
                 "sex_code": patient.HL7SexCode.strip() if patient.HL7SexCode else None,
                 "telephone": patient.TELHOME.strip() if patient.TELHOME else None,
+                "phone": _first_non_empty(
+                    getattr(patient, "TELHOME", None),
+                    getattr(patient, "TELWORK", None),
+                    getattr(patient, "MOBILE", None),
+                ),
+                "nid": _first_non_empty(
+                    getattr(patient, "HealthcareNo", None),
+                    getattr(patient, "REFNO", None),
+                    getattr(patient, "NATIONALID", None),
+                    getattr(patient, "UNIQUEID", None),
+                ),
+                "final_result": _first_non_empty(
+                    getattr(patient, "FinalViralLoadResult", None),
+                    getattr(patient, "HIVVL_ViralLoadResult", None),
+                    getattr(patient, "HIVVL_ViralLoadCAPCTM", None),
+                ),
                 "viral_load_result_category": (
                     patient.ViralLoadResultCategory.strip()
                     if patient.ViralLoadResultCategory
@@ -1271,14 +1314,7 @@ def process_patients(
                     if patient.HIVVL_VRLogValue
                     else None
                 ),
-                "reason_for_test": (
-                   "Reason Not Specified"
-                    if patient.ReasonForTest.strip() in ["Não preenchido", "No", "Reason Not Specified", "Yes", ""] 
-                    else "Routine" if patient.ReasonForTest.strip() == "Routine" 
-                    else "Repeat" if patient.ReasonForTest.strip() in ["Repeat after breastfeeding", "Repeat"] 
-                    else "Suspected treatment failure" if patient.ReasonForTest.strip() == "Suspected treatment failure" 
-                    else None
-                ),
+                "reason_for_test": _vl_reason_for_test(patient.ReasonForTest),
                 "pregnant": patient.Pregnant.strip() if patient.Pregnant else None,
                 "breastfeeding": (
                     patient.BreastFeeding.strip() if patient.BreastFeeding else None
@@ -1455,19 +1491,14 @@ def PROCESS_COMMON_PARAMS_VL(req_args):
     tuple
         (dates, facilities, facility_type, disaggregation, health_facility)
     """
-    # Date range - default to last 12 months
-    dates = (
-        req_args.get("interval_dates")[0].split(",")
-        if req_args.get("interval_dates") is not None
-        else [twelve_months_ago(), today()]
-    )
+    # Date range: CSV, repeated params or a list; defaults to the last 12 months.
+    dates = coerce_interval_dates(req_args.get("interval_dates"))
 
     # Facility type - default to province
     facility_type = req_args.get("facility_type") or "province"
 
     # Disaggregation - default to False
-    disaggregation_raw = req_args.get("disaggregation")
-    disaggregation = disaggregation_raw == "True" if disaggregation_raw else False
+    disaggregation = str(req_args.get("disaggregation") or "").strip().lower() in {"true", "1", "yes"}
 
     # Health facility
     health_facility = req_args.get("health_facility")

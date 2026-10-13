@@ -111,3 +111,7 @@ def build_error_response(error, message="An Error Occurred", code=500):
         "message": message,
         "error": str(error),
     }
+
+
+class InvalidParameter(ValueError):
+    """A query parameter the caller sent is malformed. Mapped to HTTP 400."""
