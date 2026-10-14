@@ -173,7 +173,7 @@ class VlSummarySamplesHistoryByMonth(Resource):
             - $ref: '#/parameters/DisaggregationParameter'
         responses:
             200:
-                description: Monthly indicators by registration month: registered, tested, suppressed, rejected, non_validated
+                description: "Monthly indicators by registration month (registered, tested, suppressed, rejected, non_validated)"
             401:
                 description: Missing or invalid JWT token
             500:
