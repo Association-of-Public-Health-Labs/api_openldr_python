@@ -1,197 +1,163 @@
-from utilities.utils import (
-    PROCESS_COMMON_PARAMS_VL,
-    YEAR, MONTH, DATE_PART, TOTAL_ALL, TOTAL_NOT_NULL, TOTAL_NULL,
-    SUPPRESSION, DATE_DIFF_AVG,
-    and_, func, case,
-)
+"""
+HIV VL summary (Sumário) services.
+
+Each function matches one legacy Node dashboard endpoint (named in its
+docstring); the counting rules come from hiv/vl/services/vl_common.py.
+"""
+import json
+from pathlib import Path
+
+from sqlalchemy import and_, func
+
 from hiv.vl.models.vl import VlData
+from hiv.vl.services.vl_common import (
+    date_between,
+    has_result,
+    non_validated_count,
+    not_suppressed_count,
+    parse_vl_params,
+    rejected_count,
+    requesting_location_filters,
+    suppressed_count,
+    tat_averages,
+    tat_filters,
+    test_reason_counts,
+    tested_count,
+    testing_location_filters,
+    year_month_columns,
+)
+from utilities.utils import TOTAL_ALL
+
+_TAT_VS_DISALINKS_FILE = Path(__file__).resolve().parent.parent / "data" / "tat_vs_disalinks.json"
 
 
-def _build_facility_filters(facilities, facility_type):
-    """Build facility filter conditions based on facility_type."""
-    if not facilities:
-        return []
-    if facility_type == "province":
-        return [VlData.TestingProvinceName.in_(facilities)]
-    elif facility_type == "district":
-        return [VlData.TestingDistrictName.in_(facilities)]
-    elif facility_type == "health_facility":
-        return [VlData.TestingFacilityName.in_(facilities)]
-    return []
+def _error(e):
+    return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
 
 
-def _year_month_group_order(date_field):
-    """Return (group_by, order_by) tuples for year/month grouping."""
-    cols = [YEAR(date_field), MONTH(date_field), DATE_PART("month", date_field)]
-    return cols, cols
-
-
-def _suppression_entities():
-    """Standard suppression with_entities columns."""
-    return [
-        SUPPRESSION(VlData.ViralLoadResultCategory, "Suppressed").label("suppressed"),
-        SUPPRESSION(VlData.ViralLoadResultCategory, "Not Suppressed").label("not_suppressed"),
-    ]
+def _monthly(query, month_cols):
+    return query.group_by(*month_cols).order_by(month_cols[0], month_cols[1]).all()
 
 
 # ---------------------------------------------------------------------------
 # 1. header_indicators_service_by_month
 # ---------------------------------------------------------------------------
 def header_indicators_service_by_month(req_args):
-    """Single-row summary: registered, tested, suppressed, not_suppressed, rejected."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    base_filters = [VlData.RegisteredDateTime.between(dates[0], dates[1])]
-    base_filters.extend(_build_facility_filters(facilities, facility_type))
-
+    """Single-row totals: registered, tested, suppressed, not_suppressed, rejected."""
+    params = parse_vl_params(req_args)
+    filters = [
+        date_between(VlData.RegisteredDateTime, params.dates),
+        *testing_location_filters(params),
+    ]
     try:
-        query = (
+        row = (
             VlData.query.with_entities(
-                TOTAL_ALL,
-                TOTAL_NOT_NULL(VlData.AnalysisDateTime).label("tested"),
-                SUPPRESSION(VlData.ViralLoadResultCategory, "Suppressed").label("suppressed"),
-                SUPPRESSION(VlData.ViralLoadResultCategory, "Not Suppressed").label("not_suppressed"),
-                func.count(
-                    case(
-                        (
-                            and_(
-                                VlData.LIMSRejectionCode.is_not(None),
-                                VlData.LIMSRejectionCode != "",
-                            ),
-                            1,
-                        )
-                    )
-                ).label("rejected"),
+                func.count().label("registered"),
+                tested_count(),
+                suppressed_count(),
+                not_suppressed_count(),
+                rejected_count(),
             )
-            .filter(and_(*base_filters))
+            .filter(and_(*filters))
+            .one()
         )
-        row = query.one()
         return dict(
-            registered=row.total,
+            registered=row.registered,
             tested=row.tested,
             suppressed=row.suppressed,
             not_suppressed=row.not_suppressed,
             rejected=row.rejected,
-            facilities=facilities,
-            start_date=dates[0],
-            end_date=dates[1],
+            facilities=params.facilities,
+            start_date=params.dates[0],
+            end_date=params.dates[1],
         )
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 2. number_of_samples_service_by_month
+# 2. number_of_samples_service_by_month   (legacy /dash_number_of_samples)
 # ---------------------------------------------------------------------------
 def number_of_samples_service_by_month(req_args):
-    """Monthly sample count grouped by year/month."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
-    filters = [VlData.RegisteredDateTime.between(dates[0], dates[1])]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.RegisteredDateTime)
-
+    """Samples analysed per month (every row with an AnalysisDateTime in range)."""
+    params = parse_vl_params(req_args)
+    month_cols = year_month_columns(VlData.AnalysisDateTime)
+    filters = [
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *testing_location_filters(params),
+    ]
     try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
+        data = _monthly(
+            VlData.query.with_entities(*month_cols, TOTAL_ALL).filter(and_(*filters)),
+            month_cols,
         )
-        data = query.all()
         return [
             dict(
-                    year=row.year, 
-                    month=row[1], 
-                    month_name=row[2], 
-                    total=row.total,
-                    start_date=dates[0],
-                    end_date=dates[1],
-                    facilities=facilities,
+                year=row.year, month=row.month, month_name=row.month_name,
+                total=row.total,
+                start_date=params.dates[0], end_date=params.dates[1],
+                facilities=params.facilities,
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 3. viral_suppression_service_by_month
+# 3. viral_suppression_service_by_month   (legacy /dash_viral_suppression)
 # ---------------------------------------------------------------------------
 def viral_suppression_service_by_month(req_args):
-    """Monthly suppression trend with suppressed/not_suppressed counts."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
+    """Monthly suppression; total = rows with a non-empty result category."""
+    params = parse_vl_params(req_args)
+    month_cols = year_month_columns(VlData.AnalysisDateTime)
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        has_result(),
+        *testing_location_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
     try:
-        query = (
+        data = _monthly(
             VlData.query.with_entities(
-                *group_cols,
-                *_suppression_entities(),
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
+                *month_cols, TOTAL_ALL, suppressed_count(), not_suppressed_count()
+            ).filter(and_(*filters)),
+            month_cols,
         )
-        data = query.all()
         return [
             dict(
-                year=row.year, month=row[1], month_name=row[2],
+                year=row.year, month=row.month, month_name=row.month_name,
+                total=row.total,
                 suppressed=row.suppressed,
                 not_suppressed=row.not_suppressed,
-                start_date=dates[0],
-                end_date=dates[1],
-                facilities=facilities,
+                start_date=params.dates[0], end_date=params.dates[1],
+                facilities=params.facilities,
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 4. tat_service_by_month
+# 4. tat_service_by_month   (legacy /dash_tat)
 # ---------------------------------------------------------------------------
 def tat_service_by_month(req_args):
-    """TAT summary with 4 segments grouped by year/month."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
+    """National TAT per month; ✱ no 90-day cap (Node's cap never applied)."""
+    params = parse_vl_params(req_args)
+    month_cols = year_month_columns(VlData.AnalysisDateTime)
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        *tat_filters(),
+        *testing_location_filters(params),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.AnalysisDateTime)
-
     try:
-        query = (
-            VlData.query.with_entities(
-                *group_cols,
-                DATE_DIFF_AVG([VlData.SpecimenDatetime, VlData.ReceivedDateTime]).label("collection_reception"),
-                DATE_DIFF_AVG([VlData.ReceivedDateTime, VlData.RegisteredDateTime]).label("reception_registration"),
-                DATE_DIFF_AVG([VlData.RegisteredDateTime, VlData.AnalysisDateTime]).label("registration_analysis"),
-                DATE_DIFF_AVG([VlData.AnalysisDateTime, VlData.AuthorisedDateTime]).label("analysis_validation"),
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
+        data = _monthly(
+            VlData.query.with_entities(*month_cols, *tat_averages()).filter(and_(*filters)),
+            month_cols,
         )
-        data = query.all()
         return [
             dict(
-                year=row.year, month=row[1], month_name=row[2],
+                year=row.year, month=row.month, month_name=row.month_name,
                 collection_reception=row.collection_reception,
                 reception_registration=row.reception_registration,
                 registration_analysis=row.registration_analysis,
@@ -200,83 +166,94 @@ def tat_service_by_month(req_args):
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 5. suppression_by_province_service_by_month
+# 5. suppression_by_province_service_by_month   (legacy /dash_map)
 # ---------------------------------------------------------------------------
 def suppression_by_province_service_by_month(req_args):
-    """Suppression counts grouped by RequestingProvinceName (provincial map)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-
+    """Suppression and test reasons per requesting province (map card)."""
+    params = parse_vl_params(req_args)
     filters = [
-        VlData.AnalysisDateTime.between(dates[0], dates[1]),
-        VlData.AnalysisDateTime.is_not(None),
+        date_between(VlData.AnalysisDateTime, params.dates),
+        has_result(),
+        *requesting_location_filters(params, exclude_null_province=False),
     ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
     try:
-        query = (
+        data = (
             VlData.query.with_entities(
                 VlData.RequestingProvinceName.label("province"),
-                *_suppression_entities(),
+                TOTAL_ALL,
+                suppressed_count(),
+                not_suppressed_count(),
+                *test_reason_counts(),
             )
             .filter(and_(*filters))
             .group_by(VlData.RequestingProvinceName)
             .order_by(VlData.RequestingProvinceName)
+            .all()
         )
-        data = query.all()
         return [
             dict(
                 province=row.province,
+                total=row.total,
                 suppressed=row.suppressed,
                 not_suppressed=row.not_suppressed,
-                start_date=dates[0],
-                end_date=dates[1],
-                facilities=facilities,
+                routine=row.routine,
+                treatment_failure=row.treatment_failure,
+                reason_not_specified=row.reason_not_specified,
+                start_date=params.dates[0], end_date=params.dates[1],
+                facilities=params.facilities,
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
 
 
 # ---------------------------------------------------------------------------
-# 6. samples_history_service_by_month
+# 6. samples_history_service_by_month   (legacy /dash_indicators)
 # ---------------------------------------------------------------------------
 def samples_history_service_by_month(req_args):
-    """Historical sample counts grouped by year/month (broader date range)."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    
-    filters = [VlData.RegisteredDateTime.between(dates[0], dates[1])]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-
-    group_cols, order_cols = _year_month_group_order(VlData.RegisteredDateTime)
-
+    """Monthly indicators table, grouped by registration month."""
+    params = parse_vl_params(req_args)
+    month_cols = year_month_columns(VlData.RegisteredDateTime)
+    filters = [
+        date_between(VlData.RegisteredDateTime, params.dates),
+        *testing_location_filters(params),
+    ]
     try:
-        query = (
+        data = _monthly(
             VlData.query.with_entities(
-                *group_cols,
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
+                *month_cols,
+                func.count().label("registered"),
+                tested_count(),
+                suppressed_count(),
+                rejected_count(),
+                non_validated_count(),
+            ).filter(and_(*filters)),
+            month_cols,
         )
-
-        data = query.all()
         return [
             dict(
-                year=row.year, 
-                month=row[1], 
-                month_name=row[2], 
-                total=row.total,
-                start_date=dates[0],
-                end_date=dates[1],
-                facilities=facilities,
+                year=row.year, month=row.month, month_name=row.month_name,
+                registered=row.registered,
+                tested=row.tested,
+                suppressed=row.suppressed,
+                rejected=row.rejected,
+                non_validated=row.non_validated,
             )
             for row in data
         ]
     except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 7. tat_vs_disalinks_service   (legacy /dash_tat_vs_disalinks)
+# ---------------------------------------------------------------------------
+def tat_vs_disalinks_service(req_args):
+    """Static TAT vs Disa*Link counts per semester, copied from the legacy API."""
+    with _TAT_VS_DISALINKS_FILE.open(encoding="utf-8") as handle:
+        return json.load(handle)

@@ -1,5 +1,11 @@
 # HIV Viral Load & EID Migration Design
 
+> **Updated 2026-10-12:** VL parity work is specified in
+> `openldr-monorepo/docs/superpowers/specs/2026-10-12-vl-dashboard-migration-design.md`
+> (piece 1). VL now uses the `vl` bind (not `vlSMS`), has 45 routes
+> (17 laboratory incl. 2 weekly, 17 facility, 7 summary, 4 patients), and is
+> covered by SQL-compilation tests in `tests/hiv/test_vl_*_sql.py`.
+
 **Date:** 2026-03-24
 **Status:** Approved
 **Branch:** `feature/hiv-vl-eid-migration`
@@ -77,7 +83,7 @@ authentication_routes(api) # existing
 
 | Module | Bind Key | Table | Existing? |
 |--------|----------|-------|-----------|
-| VL | `vlSMS` | VlData | Yes (model exists) |
+| VL | `vl` | VlData | Yes (model exists) |
 | EID | `dpi` | EIDMaster | Bind exists, model is new |
 
 ## Standardized Query Parameters
@@ -240,7 +246,7 @@ VL uses `ViralLoadResultCategory` ("Suppressed"/"Not Suppressed") as its key met
 ### VlData (existing — refactor)
 
 - File: `hiv/vl/models/vl.py`
-- Bind: `vlSMS`
+- Bind: `vl`
 - Table: `VlData`
 - ~150 columns, already defined
 - Key analytics columns: `ViralLoadResultCategory`, `HL7SexCode`, `AgeInYears`, `Pregnant`, `BreastFeeding`, `ReasonForTest`, facility/province/district names, datetime fields

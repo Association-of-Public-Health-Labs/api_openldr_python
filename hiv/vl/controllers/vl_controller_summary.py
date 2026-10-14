@@ -7,15 +7,17 @@ from hiv.vl.services.vl_services_summary import (
     tat_service_by_month,
     suppression_by_province_service_by_month,
     samples_history_service_by_month,
+    tat_vs_disalinks_service,
 )
 from utilities.controller_helpers import (
+    VL_FILTER_ARGS,
     build_common_parser,
     run_reporting_endpoint,
 )
 
 
 # Shared parser for all VL summary endpoints.
-_parser = build_common_parser()
+_parser = build_common_parser(extra_args=VL_FILTER_ARGS)
 
 
 class VlSummaryHeaderIndicatorsByMonth(Resource):
@@ -106,6 +108,10 @@ class VlSummaryTatByMonth(Resource):
         ---
         tags:
             - HIV Viral Load/Summary
+        description: >
+            Rows with a result and a non-negative collection-to-reception
+            interval. ✱ No 90-day cap: the legacy API meant to apply one but
+            never did.
         parameters:
             - $ref: '#/parameters/IntervalDates'
             - $ref: '#/parameters/ProvinceParameter'
@@ -167,7 +173,7 @@ class VlSummarySamplesHistoryByMonth(Resource):
             - $ref: '#/parameters/DisaggregationParameter'
         responses:
             200:
-                description: Historical sample counts grouped by year/month
+                description: Monthly indicators by registration month: registered, tested, suppressed, rejected, non_validated
             401:
                 description: Missing or invalid JWT token
             500:
@@ -176,3 +182,24 @@ class VlSummarySamplesHistoryByMonth(Resource):
         return run_reporting_endpoint(
             _parser.parse_args, samples_history_service_by_month
         )
+
+
+class VlSummaryTatVsDisalinks(Resource):
+    def get(self):
+        """
+        Retrieve national TAT vs number of Disa*Link sites per semester
+        ---
+        tags:
+            - HIV Viral Load/Summary
+        description: >
+            Static series copied from the legacy API (last semester 20S1).
+            Takes no filters.
+        responses:
+            200:
+                description: List of {semester, disalinks, tat}
+            401:
+                description: Missing or invalid JWT token
+            500:
+                description: An Error Occurred
+        """
+        return run_reporting_endpoint(_parser.parse_args, tat_vs_disalinks_service)

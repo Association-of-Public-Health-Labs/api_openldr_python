@@ -1,4 +1,6 @@
 from hiv.vl.controllers.vl_controller_laboratory import (
+    VlWeeklyReport,
+    VlWeeklyReportNational,
     VlRegisteredSamples,
     VlRegisteredSamplesByMonth,
     VlTestedSamples,
@@ -27,6 +29,8 @@ from hiv.vl.controllers.vl_controller_facility import (
     VlFacilityTestedSamplesByTestReasonByFacility,
     VlFacilityTestedSamplesPregnant,
     VlFacilityTestedSamplesBreastfeeding,
+    VlFacilityTestedSamplesPregnantByFacility,
+    VlFacilityTestedSamplesBreastfeedingByFacility,
     VlFacilityRejectedSamplesByMonth,
     VlFacilityRejectedSamplesByFacility,
     VlFacilityTatByMonth,
@@ -39,6 +43,7 @@ from hiv.vl.controllers.vl_controller_summary import (
     VlSummaryTatByMonth,
     VlSummarySuppressionByProvinceByMonth,
     VlSummarySamplesHistoryByMonth,
+    VlSummaryTatVsDisalinks,
 )
 from hiv.vl.controllers.vl_controller_patients import (
     VlPatientsByName,
@@ -83,6 +88,10 @@ def vl_routes(api):
     api.add_resource(VlTatByMonth, "/hiv/vl/laboratories/tat_by_month/")
     # Legacy: GET /suppression
     api.add_resource(VlSuppression, "/hiv/vl/laboratories/suppression/")
+    # Legacy: GET /lab_weekly_report
+    api.add_resource(VlWeeklyReport, "/hiv/vl/laboratories/weekly_report/")
+    # Legacy: GET /lab_weekly_report_national
+    api.add_resource(VlWeeklyReportNational, "/hiv/vl/laboratories/weekly_report_national/")
 
     # Facility Endpoints
     # Legacy: GET /clinic_registered_samples_by_facility
@@ -103,10 +112,13 @@ def vl_routes(api):
     api.add_resource(VlFacilityTestedSamplesByTestReasonByMonth, "/hiv/vl/facilities/tested_samples_by_test_reason_by_month/")
     # Legacy: GET /clinic_samples_by_test_reason_by_facility
     api.add_resource(VlFacilityTestedSamplesByTestReasonByFacility, "/hiv/vl/facilities/tested_samples_by_test_reason_by_facility/")
-    # Legacy: GET /clinic_tests_by_pregnancy
+    # Monthly series (no legacy route; Node's monthly versions were dead code)
     api.add_resource(VlFacilityTestedSamplesPregnant, "/hiv/vl/facilities/tested_samples_pregnant/")
-    # Legacy: GET /clinic_tests_by_breastfeeding
     api.add_resource(VlFacilityTestedSamplesBreastfeeding, "/hiv/vl/facilities/tested_samples_breastfeeding/")
+    # Legacy: GET /clinic_tests_by_pregnancy
+    api.add_resource(VlFacilityTestedSamplesPregnantByFacility, "/hiv/vl/facilities/tested_samples_pregnant_by_facility/")
+    # Legacy: GET /clinic_tests_by_breastfeeding
+    api.add_resource(VlFacilityTestedSamplesBreastfeedingByFacility, "/hiv/vl/facilities/tested_samples_breastfeeding_by_facility/")
     # Legacy: GET /clinic_samples_rejected_by_month
     api.add_resource(VlFacilityRejectedSamplesByMonth, "/hiv/vl/facilities/rejected_samples_by_month/")
     # Legacy: GET /clinic_samples_rejected_by_facility
@@ -117,7 +129,7 @@ def vl_routes(api):
     api.add_resource(VlFacilityTatByFacility, "/hiv/vl/facilities/tat_by_facility/")
 
     # Summary/Dashboard Endpoints
-    # Legacy: GET /dash_indicators
+    # No legacy equivalent (single-row header totals)
     api.add_resource(VlSummaryHeaderIndicatorsByMonth, "/hiv/vl/summary/header_indicators_by_month/")
     # Legacy: GET /dash_number_of_samples
     api.add_resource(VlSummaryNumberOfSamplesByMonth, "/hiv/vl/summary/number_of_samples_by_month/")
@@ -127,8 +139,10 @@ def vl_routes(api):
     api.add_resource(VlSummaryTatByMonth, "/hiv/vl/summary/tat_by_month/")
     # Legacy: GET /dash_map
     api.add_resource(VlSummarySuppressionByProvinceByMonth, "/hiv/vl/summary/suppression_by_province_by_month/")
-    # Legacy: GET /sampleshistory
+    # Legacy: GET /dash_indicators
     api.add_resource(VlSummarySamplesHistoryByMonth, "/hiv/vl/summary/samples_history/")
+    # Legacy: GET /dash_tat_vs_disalinks
+    api.add_resource(VlSummaryTatVsDisalinks, "/hiv/vl/summary/tat_vs_disalinks/")
 
     # Patients Endpoints
     api.add_resource(
