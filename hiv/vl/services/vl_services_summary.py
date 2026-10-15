@@ -17,6 +17,7 @@ from hiv.vl.services.vl_common import (
     not_suppressed_count,
     parse_vl_params,
     rejected_count,
+    requesting_group_column,
     requesting_location_filters,
     suppressed_count,
     tat_averages,
@@ -173,8 +174,17 @@ def tat_service_by_month(req_args):
 # 5. suppression_by_province_service_by_month   (legacy /dash_map)
 # ---------------------------------------------------------------------------
 def suppression_by_province_service_by_month(req_args):
-    """Suppression and test reasons per requesting province (map card)."""
+    """Suppression and test reasons per requesting province (map card).
+
+    With ``disaggregation`` (and ``facility_type=province&province=<P>``) the rows are
+    the districts of P instead, so the dashboard can drill into a province.
+    """
     params = parse_vl_params(req_args)
+    group = (
+        requesting_group_column(params)
+        if params.disaggregation
+        else VlData.RequestingProvinceName
+    )
     filters = [
         date_between(VlData.AnalysisDateTime, params.dates),
         has_result(),
@@ -183,20 +193,22 @@ def suppression_by_province_service_by_month(req_args):
     try:
         data = (
             VlData.query.with_entities(
-                VlData.RequestingProvinceName.label("province"),
+                group.label("location"),
                 TOTAL_ALL,
                 suppressed_count(),
                 not_suppressed_count(),
                 *test_reason_counts(),
             )
             .filter(and_(*filters))
-            .group_by(VlData.RequestingProvinceName)
-            .order_by(VlData.RequestingProvinceName)
+            .group_by(group)
+            .order_by(group)
             .all()
         )
         return [
             dict(
-                province=row.province,
+                # 'province' kept for existing callers; it holds the district when disaggregated.
+                province=row.location,
+                location=row.location,
                 total=row.total,
                 suppressed=row.suppressed,
                 not_suppressed=row.not_suppressed,
