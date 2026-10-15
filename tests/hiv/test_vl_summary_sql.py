@@ -86,3 +86,32 @@ def test_bad_dates_return_400(client, auth_headers):
         headers=auth_headers,
     )
     assert response.status_code == 400
+
+
+def test_map_groups_by_district_when_disaggregated(app):
+    args = {**ARGS, "province": ["Gaza"], "facility_type": "province", "disaggregation": "true"}
+    _, [sql] = service_sql(app, summary.suppression_by_province_service_by_month, args)
+    assert "GROUP BY [VlData].[RequestingDistrictName]" in sql
+    assert "[VlData].[RequestingProvinceName] IN ('Gaza')" in sql
+    assert "[VlData].[ViralLoadResultCategory] NOT LIKE ''" in sql
+
+
+def test_map_ignores_facility_type_without_disaggregation(app):
+    # Existing callers may send facility_type; without disaggregation the grouping stays by province.
+    args = {**ARGS, "facility_type": "district", "district": ["Chokwe"]}
+    _, [sql] = service_sql(app, summary.suppression_by_province_service_by_month, args)
+    assert "GROUP BY [VlData].[RequestingProvinceName]" in sql
+
+
+def test_map_rows_carry_location_and_keep_a_null_label(app):
+    from types import SimpleNamespace
+
+    def db_row(location):
+        return SimpleNamespace(location=location, total=10, suppressed=9, not_suppressed=1,
+                               routine=7, treatment_failure=2, reason_not_specified=1)
+
+    args = {**ARGS, "province": ["Gaza"], "facility_type": "province", "disaggregation": "true"}
+    result, _ = service_sql(app, summary.suppression_by_province_service_by_month, args,
+                            results=[[db_row("Chokwe"), db_row(None)]])
+    assert [(r["province"], r["location"]) for r in result] == [("Chokwe", "Chokwe"), (None, None)]
+    assert result[0]["suppressed"] == 9 and result[0]["routine"] == 7

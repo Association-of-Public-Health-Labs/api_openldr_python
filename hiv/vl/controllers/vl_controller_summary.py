@@ -146,7 +146,7 @@ class VlSummarySuppressionByProvinceByMonth(Resource):
             - $ref: '#/parameters/DisaggregationParameter'
         responses:
             200:
-                description: Suppression counts grouped by RequestingProvinceName
+                description: "Suppression counts per RequestingProvinceName; with disaggregation=true and facility_type=province&province=<P>, per RequestingDistrictName of that province (province and location hold the district)"
             401:
                 description: Missing or invalid JWT token
             500:
