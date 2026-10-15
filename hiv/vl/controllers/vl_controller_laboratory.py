@@ -306,7 +306,7 @@ class VlRejectedSamples(Resource):
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
-                description: Rejected samples per lab code: lab_code, testing_facility (dictionary LabName), total
+                description: "Rejected samples per lab code (lab_code, testing_facility = dictionary LabName, total)"
             401:
                 description: Missing or invalid JWT token
             500:
