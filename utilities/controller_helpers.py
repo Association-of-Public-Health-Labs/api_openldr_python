@@ -93,7 +93,7 @@ def build_common_parser(*, extra_args=None):
     parser.add_argument("facility_type", **STR_ARG)
     parser.add_argument("disaggregation", **STR_ARG)
 
-    for name, kwargs in (extra_args or []):
+    for name, kwargs in extra_args or []:
         parser.add_argument(name, **kwargs)
 
     return parser

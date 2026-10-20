@@ -21,7 +21,7 @@ def dashboard_header_component_summary_service(req_args):
     user_id = req_args.get("user_id")
 
     try:
-        user = get_user_by_id_service(user_id) 
+        user = get_user_by_id_service(user_id)
     except Exception as e:
         return {
             "status": "error",
@@ -29,7 +29,7 @@ def dashboard_header_component_summary_service(req_args):
             "message": "An Error Occurred",
             "error": str(e),
         }
-    
+
     user_role = user.role if user else "Unknown"
 
     try:
@@ -239,7 +239,7 @@ def dashboard_summary_positivity_by_month_service(req_args):
     user_id = req_args.get("user_id")
 
     try:
-        user = get_user_by_id_service(user_id) 
+        user = get_user_by_id_service(user_id)
     except Exception as e:
         return {
             "status": "error",
@@ -247,7 +247,7 @@ def dashboard_summary_positivity_by_month_service(req_args):
             "message": "An Error Occurred",
             "error": str(e),
         }
-    
+
     user_role = user.role if user else "Unknown"
 
     # Remove any empty or whitespace-only entries from facilities
@@ -277,8 +277,10 @@ def dashboard_summary_positivity_by_month_service(req_args):
                 MONTH(TBMaster.RegisteredDateTime).label("Month"),
                 DATE_PART("month", TBMaster.RegisteredDateTime).label("Month_Name"),
                 YEAR(TBMaster.RegisteredDateTime),
-                func.count(TBMaster.RegisteredDateTime).label("Registered_Samples"),
-                func.count(TBMaster.AnalysisDateTime).label("Analysed_Samples"),
+                TOTAL_NOT_NULL(TBMaster.RegisteredDateTime).label("Registered_Samples"),
+                TOTAL_NOT_NULL(TBMaster.AnalysisDateTime).label("Analysed_Samples"),
+                # func.count(TBMaster.RegisteredDateTime).label("Registered_Samples"),
+                # func.count(TBMaster.AnalysisDateTime).label("Analysed_Samples"),
                 func.count(
                     case(
                         (
@@ -384,7 +386,7 @@ def dashboard_summary_positivity_by_lab_service(req_args):
     user_id = req_args.get("user_id")
 
     try:
-        user = get_user_by_id_service(user_id) 
+        user = get_user_by_id_service(user_id)
     except Exception as e:
         return {
             "status": "error",
@@ -392,7 +394,7 @@ def dashboard_summary_positivity_by_lab_service(req_args):
             "message": "An Error Occurred",
             "error": str(e),
         }
-    
+
     user_role = user.role if user else "Unknown"
 
     ColumnNames = GET_COLUMN_NAME(
@@ -527,7 +529,7 @@ def dashboard_summary_positivity_by_lab_by_age_service(req_args):
     user_id = req_args.get("user_id")
 
     try:
-        user = get_user_by_id_service(user_id) 
+        user = get_user_by_id_service(user_id)
     except Exception as e:
         return {
             "status": "error",
@@ -535,7 +537,7 @@ def dashboard_summary_positivity_by_lab_by_age_service(req_args):
             "message": "An Error Occurred",
             "error": str(e),
         }
-    
+
     user_role = user.role if user else "Unknown"
 
     # Remove any empty or whitespace-only entries from facilities
@@ -698,7 +700,7 @@ def dashboard_summary_sample_types_by_month_by_age_service(req_args):
     user_id = req_args.get("user_id")
 
     try:
-        user = get_user_by_id_service(user_id) 
+        user = get_user_by_id_service(user_id)
     except Exception as e:
         return {
             "status": "error",
@@ -706,7 +708,7 @@ def dashboard_summary_sample_types_by_month_by_age_service(req_args):
             "message": "An Error Occurred",
             "error": str(e),
         }
-    
+
     user_role = user.role if user else "Unknown"
 
     # Remove any empty or whitespace-only entries from facilities
@@ -740,7 +742,7 @@ def dashboard_summary_sample_types_by_month_by_age_service(req_args):
         "Feces": TB_FECES_SPECIMEN_SOURCE_CODES,
         "Urine": TB_URINE_SPECIMEN_SOURCE_CODES,
         "Blood": TB_BLOOD_SPECIMEN_SOURCE_CODES,
-        "PL": TB_PL_SPECIMEN_SOURCE_CODES
+        "PL": TB_PL_SPECIMEN_SOURCE_CODES,
     }
 
     ALL_SPECIMEN_CODES = (
@@ -900,7 +902,7 @@ def dashboard_summary_sample_types_by_facility_by_age_service(req_args):
     user_id = req_args.get("user_id")
 
     try:
-        user = get_user_by_id_service(user_id) 
+        user = get_user_by_id_service(user_id)
     except Exception as e:
         return {
             "status": "error",
@@ -908,7 +910,7 @@ def dashboard_summary_sample_types_by_facility_by_age_service(req_args):
             "message": "An Error Occurred",
             "error": str(e),
         }
-    
+
     user_role = user.role if user else "Unknown"
 
     ColumnNames = GET_COLUMN_NAME(disaggregation, facility_type, TBMaster, "facilities")
@@ -948,7 +950,7 @@ def dashboard_summary_sample_types_by_facility_by_age_service(req_args):
             "Feces": TB_FECES_SPECIMEN_SOURCE_CODES,
             "Urine": TB_URINE_SPECIMEN_SOURCE_CODES,
             "Blood": TB_BLOOD_SPECIMEN_SOURCE_CODES,
-            "PL": TB_PL_SPECIMEN_SOURCE_CODES
+            "PL": TB_PL_SPECIMEN_SOURCE_CODES,
         }
 
         ALL_SPECIMEN_CODES = (
