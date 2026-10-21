@@ -45,7 +45,12 @@ COPY . .
 
 EXPOSE 5000
 
-CMD gunicorn --bind 0.0.0.0:5000 \
+# A new container starts with an empty report cache: fill it in the background once gunicorn
+# is up (tools/warm_report_cache.py). REPORT_CACHE_WARM_ON_START=0 skips it.
+CMD if [ "${REPORT_CACHE_WARM_ON_START:-1}" != "0" ]; then \
+        (sleep "${REPORT_CACHE_WARM_DELAY:-30}" && python -m tools.warm_report_cache) & \
+    fi; \
+    exec gunicorn --bind 0.0.0.0:5000 \
     --workers "${GUNICORN_WORKERS:-3}" \
     --timeout "${GUNICORN_TIMEOUT:-300}" \
     --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-60}" \
