@@ -181,8 +181,16 @@ def _location_keys(rows, level):
     if level in ("district", "health_facility"):
         keys.append(rows.c.district)
     if level == "health_facility":
-        keys += [rows.c.health_facility, rows.c.facility_code]
+        keys.append(rows.c.health_facility)
     return keys
+
+
+def _location_columns(rows, level):
+    # A facility is one row even when some weeks lack its national code (CS Morrumbene, Sep 2026):
+    # grouped by name, with the code the table has.
+    if level == "health_facility":
+        return [func.max(func.ltrim(func.rtrim(rows.c.facility_code))).label("facility_code")]
+    return []
 
 
 def _error(e):
@@ -196,7 +204,7 @@ def tat_by_location(model, req_args):
         latest = _latest_rows(model, params)
         keys = _location_keys(latest, params.level)
         rows = (
-            db.session.query(*keys, *_sums(latest))
+            db.session.query(*keys, *_location_columns(latest, params.level), *_sums(latest))
             .filter(latest.c.copy == 1)
             .group_by(*keys)
             .order_by(*keys)

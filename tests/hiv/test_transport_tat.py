@@ -74,7 +74,9 @@ def test_eid_reads_its_own_dates_and_total(app):
 def test_levels_and_filters(app):
     args = {**WEEK, "facility_type": "health_facility", "province": ["Gaza"], "district": ["Chokwe"], "type_of_test": "Convencional"}
     _, [sql] = service_sql(app, vl.transport_tat_by_location_service, args)
-    assert "GROUP BY latest.province, latest.district, latest.health_facility, latest.facility_code" in sql
+    assert "GROUP BY latest.province, latest.district, latest.health_facility ORDER BY" in sql
+    # One row per facility, even when some weeks have no code.
+    assert "max(ltrim(rtrim(latest.facility_code))) AS facility_code" in sql
     assert "[VLTransportTATPerWeek].[ProvinceName] IN ('Gaza')" in sql
     assert "[VLTransportTATPerWeek].[DistrictName] IN ('Chokwe')" in sql
     assert "[VLTransportTATPerWeek].[TypeOfTest] = 'Convencional'" in sql
