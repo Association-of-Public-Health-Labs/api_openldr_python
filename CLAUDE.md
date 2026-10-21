@@ -174,6 +174,25 @@ Errors: services return `{"status": "error", "code": N}` and
 `run_reporting_endpoint` sends HTTP N. 5xx bodies never include exception
 text, and `InvalidParameter` gives a 400.
 
+## Report cache (dashboard defaults)
+
+The VL and TB dashboards open on "last 12 months" reports. `run_reporting_endpoint`
+serves those from a shared file cache (`utilities/report_cache.py`), after the token check:
+
+- Cached: `/hiv/vl/*` and `/tb/gx/*` with a default window, VL's (same day last year → today)
+  or TB Laboratório's (1st of the month 11 months ago → today), ±1 day, and no `province`,
+  `district`, `health_facility` or `lab_code`. The key leaves out the dates.
+- Never cached: patient endpoints, `facility_type=health_facility`, other periods, errors.
+- Responses carry `X-Report-Cache: HIT|MISS` and `X-Report-Computed-At`.
+- `tools/warm_report_cache.py` recomputes the seeds (`tools/report_cache_seeds.py`, the
+  dashboards' first-screen requests) and every entry already cached. The container runs it
+  at start (`REPORT_CACHE_WARM_ON_START`, default on); schedule it twice a day too:
+  `python -m tools.warm_report_cache`.
+- Env: `REPORT_CACHE_ENABLED` (default on, off in tests), `REPORT_CACHE_DIR`
+  (default `/tmp/openldr-report-cache`), `REPORT_CACHE_MAX_AGE_HOURS` (default 24: an older
+  entry is recomputed on the next request if the warm-up stopped).
+- A new dashboard default request: add it to the seeds.
+
 ## Utility Functions (utilities/utils.py)
 
 Key query builder helpers used across all modules:

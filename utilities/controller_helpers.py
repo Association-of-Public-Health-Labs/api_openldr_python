@@ -31,12 +31,13 @@ Usage example::
             )
 """
 
-from flask import request, session
+from flask import current_app, request, session
 from flask_restful import reqparse
 from werkzeug.exceptions import HTTPException
 
 import logging
 
+from utilities import report_cache
 from utilities.service_helpers import InvalidParameter
 from utilities.token_verification import TokenVerificationError, verify_bearer_token
 from utilities.utils import get_token, get_user_token_info
@@ -181,21 +182,47 @@ def service_result_response(result):
     return body, code
 
 
+# Set by tools/warm_report_cache.py in its own process: recompute even when a fresh entry exists.
+FORCE_REFRESH = False
+
+
+def _report_cache_active():
+    """``REPORT_CACHE_ENABLED`` in the app config wins (tests); otherwise the environment, never in tests."""
+    flag = current_app.config.get("REPORT_CACHE_ENABLED")
+    if flag is not None:
+        return bool(flag)
+    return report_cache.enabled() and not current_app.testing
+
+
+def _cache_headers(state, computed_at):
+    return {"X-Report-Cache": state, "X-Report-Computed-At": computed_at}
+
+
 def run_reporting_endpoint(parse_fn, service_fn):
     """
     Execute the standard pipeline shared by every reporting endpoint.
 
     1. Authenticate the request and populate the session.
-    2. Parse the request arguments via ``parse_fn``.
-    3. Inject ``user_id`` into the parsed arguments.
-    4. Invoke ``service_fn(req_args)``.
-    5. Map the outcome to an HTTP response: ``InvalidParameter`` -> 400,
+    2. Serve a dashboard default report ("last 12 months") from the shared
+       report cache when it holds a fresh copy (see ``utilities/report_cache.py``).
+    3. Parse the request arguments via ``parse_fn``.
+    4. Inject ``user_id`` into the parsed arguments.
+    5. Invoke ``service_fn(req_args)``.
+    6. Map the outcome to an HTTP response: ``InvalidParameter`` -> 400,
        service error dicts -> their own status, anything unexpected -> a
-       generic 500 (details are logged, never returned).
+       generic 500 (details are logged, never returned). A successful default
+       report is stored in the cache.
     """
     user_id, err = authenticate_request()
     if err is not None:
         return err
+
+    # After authentication: the cache never answers a request without a valid token.
+    cache_key = report_cache.cache_key(request.path, dict(request.args.lists())) if _report_cache_active() else None
+    if cache_key is not None and not FORCE_REFRESH:
+        entry = report_cache.read(cache_key)
+        if entry is not None:
+            return entry["data"], 200, _cache_headers("HIT", entry["computed_at"])
 
     try:
         req_args = parse_fn()
@@ -209,4 +236,10 @@ def run_reporting_endpoint(parse_fn, service_fn):
         logger.exception("Unhandled error on %s", request.path)
         return {"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500
 
-    return service_result_response(result)
+    response = service_result_response(result)
+    # Errors come back as (body, code); only a successful report is cached.
+    if cache_key is not None and not isinstance(response, tuple):
+        entry = report_cache.write(cache_key, response)
+        if entry is not None:
+            return response, 200, _cache_headers("MISS", entry["computed_at"])
+    return response
