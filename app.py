@@ -139,7 +139,13 @@ app.config["SWAGGER"] = {
 
 
 # Enable CORS (Cross-Origin Resource Sharing) for the application
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+CORS(
+    app,
+    resources={r"/*": {"origins": "*"}},
+    supports_credentials=True,
+    # The dashboards may show when a cached default report was computed.
+    expose_headers=["X-Report-Cache", "X-Report-Computed-At"],
+)
 
 # Create a new API instance and bind it to the Flask application
 api = Api(app)

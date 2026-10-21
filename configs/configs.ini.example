@@ -1,0 +1,34 @@
+; Copy to configs/configs.ini and fill the real settings. Do not commit secrets.
+; Environment variables override these values on Windows and Linux.
+[Flask]
+secret_key =
+
+[Domains]
+; Example: tcp:sql.example.test,1433 or sql.example.test\SQLEXPRESS
+cdr =
+local =
+cloud =
+tb =
+
+[Databases]
+database_user =
+database_password =
+ViralLoadData =
+Dpi =
+HivAdvancedDisease =
+TBData =
+Dictionary =
+Users =
+ReportData =
+
+[Schemas]
+cdr_schema =
+
+[Clerk]
+clerk_webhook_secret =
+secret_key =
+api_endpoint =
+clerk_jwts_url =
+clerk_issuer =
+clerk_public_key =
+clerk_authorized_parties =

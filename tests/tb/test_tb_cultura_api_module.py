@@ -1,4 +1,3 @@
-from app import app
 from tb.cultura.controllers.tb_cultura_controller_facility import (
     TBCulturaFacilityMetrics,
 )
@@ -37,7 +36,22 @@ def test_tb_cultura_controllers_are_importable():
     assert TBCulturaResistanceMetrics
 
 
-def test_tb_cultura_routes_are_registered():
+def test_tb_cultura_routes_are_registered(monkeypatch):
+    # Import the production entry point using test databases. Production now
+    # validates SQL Server settings at startup, which unit tests do not need.
+    from configs import paths
+
+    monkeypatch.setenv("SQLALCHEMY_DISABLE_POOLING", "true")
+    monkeypatch.setattr(
+        paths,
+        "get_sqlalchemy_binds",
+        lambda domain: {
+            key: "sqlite:///:memory:"
+            for key in ("vl", "dpi", "ad", "tb", "dict", "users", "reportData")
+        },
+    )
+    from app import app
+
     rules = {rule.rule for rule in app.url_map.iter_rules()}
 
     assert "/tb/cultura/summary/summary_indicators/" in rules

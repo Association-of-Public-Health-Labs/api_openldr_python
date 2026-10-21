@@ -11,6 +11,7 @@ from configs.paths import *
 # long-running production servers the default date range drifted further into
 # the past every day. They are now regenerated on every call.
 
+
 def today():
     """Return the current date as a ``YYYY-MM-DD`` string."""
     return datetime.now().strftime("%Y-%m-%d")
@@ -387,8 +388,7 @@ def GENDER_SUPPRESSION(fields, values):
         A statement with the label "gender_suppression"
     """
     return func.count(
-        case(
-            ((and_(fields[0] == values[0], fields[1] == values[1]), 1)), else_=None)
+        case(((and_(fields[0] == values[0], fields[1] == values[1]), 1)), else_=None)
     )
 
 
@@ -443,12 +443,12 @@ def trl_by_lab_by_days(TBMaster):
 def trl_by_lab_by_days_tb(TBMaster):
     """
     Function to calculate the turnaround time (TAT) by laboratory in days using TBMaster model
-    
+
     Parameters
     ----------
     TBMaster : sqlalchemy.ext.declarative.DeclarativeMeta
         The TBMaster model
-    
+
     Returns
     -------
     dict
@@ -490,20 +490,24 @@ def trl_by_lab_avg_days(TBMaster):
     """
     return {
         "colheita_us__recepcao_lab": func.avg(
-            func.datediff(text("DAY"), TBMaster.SpecimenDatetime,
-                          TBMaster.ReceivedDateTime)
+            func.datediff(
+                text("DAY"), TBMaster.SpecimenDatetime, TBMaster.ReceivedDateTime
+            )
         ),
         "recepcao_lab__registo_no_lab": func.avg(
-            func.datediff(text("DAY"), TBMaster.ReceivedDateTime,
-                          TBMaster.RegisteredDateTime)
+            func.datediff(
+                text("DAY"), TBMaster.ReceivedDateTime, TBMaster.RegisteredDateTime
+            )
         ),
         "registo_no_lab__analise_no_lab": func.avg(
-            func.datediff(text("DAY"), TBMaster.RegisteredDateTime,
-                          TBMaster.AnalysisDateTime)
+            func.datediff(
+                text("DAY"), TBMaster.RegisteredDateTime, TBMaster.AnalysisDateTime
+            )
         ),
         "analise_no_lab__validacao_no_lab": func.avg(
-            func.datediff(text("DAY"), TBMaster.AnalysisDateTime,
-                          TBMaster.AuthorisedDateTime)
+            func.datediff(
+                text("DAY"), TBMaster.AnalysisDateTime, TBMaster.AuthorisedDateTime
+            )
         ),
     }
 
@@ -581,12 +585,10 @@ TB_SPUTUM_SPECIMEN_SOURCE_CODES = [
 TB_FECES_SPECIMEN_SOURCE_CODES = ["FEC", "FEC-L", "FEC-M", "FEC-S", "FZ", "FF"]
 
 # List of possible values for the urine specimen source code that indicate TB specimens
-TB_URINE_SPECIMEN_SOURCE_CODES = [
-    "UR", "UR-L", "UR-M", "UR-S", "U", "SUF", "US"]
+TB_URINE_SPECIMEN_SOURCE_CODES = ["UR", "UR-L", "UR-M", "UR-S", "U", "SUF", "US"]
 
 # List of possible values for the blood specimen source code that indicate TB specimens
-TB_BLOOD_SPECIMEN_SOURCE_CODES = [
-    "BLO", "BLO-L", "BLO-M", "BLO-S", "SA", "SAT"]
+TB_BLOOD_SPECIMEN_SOURCE_CODES = ["BLO", "BLO-L", "BLO-M", "BLO-S", "SA", "SAT"]
 
 # List of possible values for the Pleural Liquid specimen source code that indicate TB specimens
 TB_PL_SPECIMEN_SOURCE_CODES = ["LP"]
@@ -709,7 +711,7 @@ def get_user_token_info(token_payload):
         "first_name": token_payload.get("first_name"),
         "last_name": token_payload.get("last_name"),
         "email_address": token_payload.get("email_address"),
-        "full_name": token_payload.get("full_name")
+        "full_name": token_payload.get("full_name"),
     }
 
     return user_info
@@ -940,19 +942,16 @@ def PROCESS_COMMON_PARAMS_FACILITY(args):
 
     # Get the health facility from the input arguments, defaulting to None if not provided
     health_facility = (
-        args.get("health_facility") if args.get(
-            "health_facility") is not None else None
+        args.get("health_facility") if args.get("health_facility") is not None else None
     )
     # Get the GeneXpert result type from the input arguments, defaulting to "Ultra 6 Cores" if not provided
     gx_result_type = (
-        args.get("genexpert_result_type") if args.get(
-            "genexpert_result_type") else None
+        args.get("genexpert_result_type") if args.get("genexpert_result_type") else None
     )
 
     # Get the type of laboratory from the input arguments, defaulting to "Conventional" if not provided
     type_of_laboratory = (
-        args.get("type_of_laboratory") if args.get(
-            "type_of_laboratory") else "all"
+        args.get("type_of_laboratory") if args.get("type_of_laboratory") else "all"
     )
 
     if args.get("conventional_laboratories") is not None:
@@ -1498,7 +1497,11 @@ def PROCESS_COMMON_PARAMS_VL(req_args):
     facility_type = req_args.get("facility_type") or "province"
 
     # Disaggregation - default to False
-    disaggregation = str(req_args.get("disaggregation") or "").strip().lower() in {"true", "1", "yes"}
+    disaggregation = str(req_args.get("disaggregation") or "").strip().lower() in {
+        "true",
+        "1",
+        "yes",
+    }
 
     # Health facility
     health_facility = req_args.get("health_facility")

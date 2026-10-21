@@ -14,7 +14,6 @@ from utilities.controller_helpers import (
     run_reporting_endpoint,
 )
 
-
 # Shared parser for all TB GeneXpert summary endpoints.
 _parser = build_common_parser(
     extra_args=[
