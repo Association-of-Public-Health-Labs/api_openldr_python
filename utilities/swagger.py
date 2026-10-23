@@ -15,8 +15,8 @@ swagger_template = {
         }
     },
     "security": [{"Bearer": []}],
-    "host": "dev.openldr.org.mz",  # Uncomment this line to use the development server
-    # "host": "api.openldr.org.mz", # Uncomment this line to use the production server
+    # "host": "dev.openldr.org.mz",  # Uncomment this line to use the development server
+    "host": "api.openldr.org.mz",  # Uncomment this line to use the production server
     # "host": "6cb88dcff631.ngrok-free.app",  # Uncomment this line to use ngrok
     # "host": "localhost:5000",  # Uncomment this line to use the local server
     "basePath": "/",
