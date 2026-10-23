@@ -1,3 +1,4 @@
+from hiv.vl.controllers.vl_controller_transport import VlTransportTatByLocation, VlTransportTatByWeek
 from hiv.vl.controllers.vl_controller_laboratory import (
     VlWeeklyReport,
     VlWeeklyReportNational,
@@ -92,6 +93,10 @@ def vl_routes(api):
     api.add_resource(VlWeeklyReport, "/hiv/vl/laboratories/weekly_report/")
     # Legacy: GET /lab_weekly_report_national
     api.add_resource(VlWeeklyReportNational, "/hiv/vl/laboratories/weekly_report_national/")
+
+    # Transport TAT (collection -> lab reception), weekly, from ReportData (new)
+    api.add_resource(VlTransportTatByLocation, "/hiv/vl/transport/tat_by_location/")
+    api.add_resource(VlTransportTatByWeek, "/hiv/vl/transport/tat_by_week/")
 
     # Facility Endpoints
     # Legacy: GET /clinic_registered_samples_by_facility

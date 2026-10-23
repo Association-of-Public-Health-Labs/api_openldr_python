@@ -174,6 +174,24 @@ Errors: services return `{"status": "error", "code": N}` and
 `run_reporting_endpoint` sends HTTP N. 5xx bodies never include exception
 text, and `InvalidParameter` gives a 400.
 
+## Transport TAT (VL and EID)
+
+`/hiv/{vl,eid}/transport/tat_by_location/` (one row per province / district / health
+facility, `facility_type`) and `/hiv/{vl,eid}/transport/tat_by_week/` (one row per week for an
+area) read ReportData's `VLTransportTATPerWeek` / `EIDTransportTATPerWeek`, the tables behind the
+weekly spreadsheets' "Tempo de Transporte" sheet (api-weekly-reports-python). Shared logic in
+`hiv/transport_tat_service.py`; columns in `hiv/transport_tat_model.py`.
+
+- Counts: `collection_to_lab_reception_*` ("Colheita à Recepção no Lab": <7, 7–15, 16–21, >21
+  days, no reception date). EID also returns `total_tested` / `no_collection_date`; VL's table has
+  no total (null).
+- Rows: weeks inside `interval_dates` (start >= window start, end <= window end), Sunday–Saturday
+  only, with a requesting facility, and **one copy per facility, lab, test and week** (latest
+  `UpdatedAt`): the ETL inserts duplicates on its 8-hourly runs (~29% of VL rows in Oct 2026), which
+  the spreadsheet's query still counts.
+- Filters: `province`, `district`, `health_facility`, `type_of_test` (Convencional / Point-of-care).
+- Defaults: last complete week (by location), last 28 complete weeks (by week).
+
 ## Report cache (dashboard defaults)
 
 The VL and TB dashboards open on "last 12 months" reports. `run_reporting_endpoint`
@@ -310,6 +328,7 @@ All required variables must be set before running:
 | `LOCAL_DOMAIN` / `CDR_DOMAIN` / `CLOUD_DOMAIN` | SQL Server hostnames per environment |
 | `TB_DASHBOARD_DOMAIN` | TB dashboard server |
 | `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS`, `DB_REPORT_DATA` | Database names |
+| `REPORT_DATA_HOST` / `REPORT_DATA_USER` / `REPORT_DATA_PASSWORD` | Optional: ReportData on another server or with its own login (blank = the environment's server and `DB_USER` / `DB_PASSWORD`) |
 
 The active environment binding is selected in `app.py` by assigning one of the three `SQLALCHEMY_BINDS_*` dicts from `configs/paths.py` to `app.config["SQLALCHEMY_BINDS"]`.
 

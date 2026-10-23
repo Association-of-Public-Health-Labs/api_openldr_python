@@ -36,6 +36,10 @@ swagger_template = {
             "description": "VL Dashboard summary metrics",
         },
         {
+            "name": "HIV Viral Load/Transport",
+            "description": "VL sample transport TAT (collection to lab reception), weekly, from ReportData",
+        },
+        {
             "name": "HIV EID/Laboratories",
             "description": "EID Laboratory-level analytics",
         },
@@ -46,6 +50,10 @@ swagger_template = {
         {
             "name": "HIV EID/Summary",
             "description": "EID Dashboard summary metrics",
+        },
+        {
+            "name": "HIV EID/Transport",
+            "description": "EID sample transport TAT (collection to lab reception), weekly, from ReportData",
         },
         {
             "name": "Tuberculosis/Laboratories",
@@ -597,6 +605,22 @@ swagger_template = {
             "enum": ["registration", "analysis"],
             "required": False,
             "description": "Which date the interval_dates window applies to. registration (default) = RegisteredDateTime; analysis = AnalysisDateTime (use for drill-downs from tested/suppression/pregnancy/age cards). rejected=true always uses the inclusive registration date, like the rejection cards.",
+        },
+        "TypeOfTestParameter": {
+            "name": "type_of_test",
+            "in": "query",
+            "type": "string",
+            "enum": ["Convencional", "Point-of-care"],
+            "required": False,
+            "description": "Only this type of test (TypeOfTest in ReportData's transport tables).",
+        },
+        "TransportFacilityType": {
+            "name": "facility_type",
+            "in": "query",
+            "type": "string",
+            "enum": ["province", "district", "health_facility"],
+            "required": False,
+            "description": "Level of the rows: one per province (default), district or requesting health facility.",
         },
         "RejectedParameter": {
             "name": "rejected",

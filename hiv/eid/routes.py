@@ -1,3 +1,4 @@
+from hiv.eid.controllers.eid_controller_transport import EidTransportTatByLocation, EidTransportTatByWeek
 from hiv.eid.controllers.eid_controller_laboratory import (
     EidTestedSamplesByMonth,
     EidRegisteredSamplesByMonth,
@@ -43,6 +44,10 @@ from hiv.eid.controllers.eid_controller_summary import (
 
 def eid_routes(api):
     """Registers the routes for HIV EID API endpoints."""
+    # Transport TAT (collection -> lab reception), weekly, from ReportData (new)
+    api.add_resource(EidTransportTatByLocation, "/hiv/eid/transport/tat_by_location/")
+    api.add_resource(EidTransportTatByWeek, "/hiv/eid/transport/tat_by_week/")
+
     # Laboratory Endpoints
     # Legacy: GET /eid/lab/all/samples_tested_by_month + /eid/lab/conventional/samples_tested_by_month + /eid/lab/poc/samples_tested_by_month
     api.add_resource(EidTestedSamplesByMonth, "/hiv/eid/laboratories/tested_samples_by_month/")
