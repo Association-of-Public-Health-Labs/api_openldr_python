@@ -88,7 +88,7 @@ def _log_sql_startup_config():
         "query_timeout": _get_env_int("SQL_QUERY_TIMEOUT", "180"),
     }
     app.logger.info(
-        "OpenLDR SQL config: driver=%s host=%s databases=%s encrypt=%s "
+        "OpenLDR SQL config: driver=%s host=%s databases=%s reportData=%s@%s encrypt=%s "
         "trustServerCertificate=%s mars=%s app=%s pool=%s",
         SQL_ODBC_DRIVER,
         CDR_DOMAIN_NAME,
@@ -100,6 +100,8 @@ def _log_sql_startup_config():
             "dict": DICT_DATABASE_DATABASE,
             "users": USER_DATABASE,
         },
+        REPORT_DATA_DATABASE,
+        REPORT_DATA_HOST or CDR_DOMAIN_NAME,
         SQL_CONNECTION_OPTIONS.get("Encrypt"),
         SQL_CONNECTION_OPTIONS.get("TrustServerCertificate"),
         SQL_CONNECTION_OPTIONS.get("MARS_Connection"),

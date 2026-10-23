@@ -131,3 +131,36 @@ def test_connection_check_stops_before_engine_creation_on_missing_config(
     assert check_mssql_connection.main() == 1
     assert "CDR_DOMAIN" in capsys.readouterr().err
     create_engine.assert_not_called()
+
+
+def _odbc(url):
+    return url.query["odbc_connect"]
+
+
+def test_report_data_uses_its_own_server_and_login_when_set(load_config, monkeypatch):
+    for name, value in {
+        "CDR_DOMAIN": "main.example.test", "DB_USER": "main_user", "DB_PASSWORD": "main_pwd",
+        "DB_VL_DATA": "ViralLoadData", "DB_REPORT_DATA": "ReportData",
+        "REPORT_DATA_HOST": "reports.example.test", "REPORT_DATA_USER": "report_user",
+        "REPORT_DATA_PASSWORD": "report_pwd",
+    }.items():
+        monkeypatch.setenv(name, value)
+    binds = load_config("Linux")["SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ"]
+    report = _odbc(binds["reportData"])
+    assert "SERVER=reports.example.test;" in report
+    assert "UID=report_user;" in report and "PWD=report_pwd;" in report
+    vl = _odbc(binds["vl"])
+    assert "SERVER=main.example.test;" in vl and "UID=main_user;" in vl
+
+
+def test_report_data_falls_back_to_the_main_server_and_login(load_config, monkeypatch):
+    for name, value in {
+        "CDR_DOMAIN": "main.example.test", "DB_USER": "main_user", "DB_PASSWORD": "main_pwd",
+        "DB_REPORT_DATA": "ReportData",
+    }.items():
+        monkeypatch.setenv(name, value)
+    for name in ("REPORT_DATA_HOST", "REPORT_DATA_USER", "REPORT_DATA_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+    report = _odbc(load_config("Linux")["SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ"]["reportData"])
+    assert "SERVER=main.example.test;" in report
+    assert "UID=main_user;" in report and "PWD=main_pwd;" in report

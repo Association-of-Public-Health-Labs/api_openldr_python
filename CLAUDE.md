@@ -328,6 +328,7 @@ All required variables must be set before running:
 | `LOCAL_DOMAIN` / `CDR_DOMAIN` / `CLOUD_DOMAIN` | SQL Server hostnames per environment |
 | `TB_DASHBOARD_DOMAIN` | TB dashboard server |
 | `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS`, `DB_REPORT_DATA` | Database names |
+| `REPORT_DATA_HOST` / `REPORT_DATA_USER` / `REPORT_DATA_PASSWORD` | Optional: ReportData on another server or with its own login (blank = the environment's server and `DB_USER` / `DB_PASSWORD`) |
 
 The active environment binding is selected in `app.py` by assigning one of the three `SQLALCHEMY_BINDS_*` dicts from `configs/paths.py` to `app.config["SQLALCHEMY_BINDS"]`.
 
