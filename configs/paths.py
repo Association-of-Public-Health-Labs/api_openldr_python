@@ -61,6 +61,14 @@ REPORT_DATA_DATABASE = get_config("Databases", "ReportData", "DB_REPORT_DATA")
 USERNAME = get_config("Databases", "database_user", "DB_USER")
 PASSWORD = get_config("Databases", "database_password", "DB_PASSWORD")
 
+# ReportData may live on another server, with its own login. Blank values fall
+# back to the environment's server and DB_USER / DB_PASSWORD.
+REPORT_DATA_HOST = get_config("Databases", "report_data_host", "REPORT_DATA_HOST")
+REPORT_DATA_USER = get_config("Databases", "report_data_user", "REPORT_DATA_USER") or USERNAME
+REPORT_DATA_PASSWORD = (
+    get_config("Databases", "report_data_password", "REPORT_DATA_PASSWORD") or PASSWORD
+)
+
 
 # -----------------------------
 # Schemas
@@ -149,7 +157,9 @@ SQLALCHEMY_BINDS_APHL_OPENLDR_ORG_MZ = {
     "tb": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, TBDATA_DATABASE_DATABASE),
     "dict": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, DICT_DATABASE_DATABASE),
     "users": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, USER_DATABASE),
-    "reportData": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, REPORT_DATA_DATABASE),
+    "reportData": make_url(
+        REPORT_DATA_USER, REPORT_DATA_PASSWORD, REPORT_DATA_HOST or LOCAL_DOMAIN_NAME, REPORT_DATA_DATABASE
+    ),
 }
 
 SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ = {
@@ -160,7 +170,9 @@ SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ = {
     "tb": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, TBDATA_DATABASE_DATABASE),
     "dict": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, DICT_DATABASE_DATABASE),
     "users": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, USER_DATABASE),
-    "reportData": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, REPORT_DATA_DATABASE),
+    "reportData": make_url(
+        REPORT_DATA_USER, REPORT_DATA_PASSWORD, REPORT_DATA_HOST or CDR_DOMAIN_NAME, REPORT_DATA_DATABASE
+    ),
 }
 
 SQLALCHEMY_BINDS_CLOUD_QUEUE_OPENLDR_ORG_MZ = {
@@ -170,5 +182,7 @@ SQLALCHEMY_BINDS_CLOUD_QUEUE_OPENLDR_ORG_MZ = {
     "tb": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, TBDATA_DATABASE_DATABASE),
     "dict": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, DICT_DATABASE_DATABASE),
     "users": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, USER_DATABASE),
-    "reportData": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, REPORT_DATA_DATABASE),
+    "reportData": make_url(
+        REPORT_DATA_USER, REPORT_DATA_PASSWORD, REPORT_DATA_HOST or CLOUD_DOMAIN_NAME, REPORT_DATA_DATABASE
+    ),
 }
