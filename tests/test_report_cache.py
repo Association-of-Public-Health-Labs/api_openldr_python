@@ -80,6 +80,13 @@ class TestCacheKey:
     def test_tb_reports_are_cached_too(self):
         assert report_cache.cache_key("/tb/gx/facilities/tested_samples/", self.args(), TODAY) is not None
 
+    def test_eid_default_window_is_cacheable(self):
+        key = report_cache.cache_key("/hiv/eid/summary/indicators/", self.args(lab_type=["poc"]), TODAY)
+        assert key == {"path": "/hiv/eid/summary/indicators/", "window": YEAR, "params": {"lab_type": ["poc"]}}
+
+    def test_eid_lab_filter_stays_live(self):
+        assert report_cache.cache_key("/hiv/eid/summary/indicators/", self.args(lab_code=["PCD"]), TODAY) is None
+
     @pytest.mark.parametrize("name", ["province", "district", "health_facility", "lab_code"])
     def test_user_filters_stay_live(self, name):
         assert report_cache.cache_key(URL, self.args(**{name: ["Gaza"]}), TODAY) is None

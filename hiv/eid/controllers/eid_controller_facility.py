@@ -1,4 +1,3 @@
-from flask import jsonify
 from flask_restful import Resource
 from hiv.eid.services.eid_services_facilities import (
     facility_registered_samples_service,
@@ -16,10 +15,10 @@ from hiv.eid.services.eid_services_facilities import (
     facility_key_indicators_service,
     facility_tested_samples_by_age_service,
 )
-from hiv.eid.controllers.eid_controller_laboratory import (
-    _execute_eid_service,
-    _parse_eid_common_args,
-)
+from hiv.eid.controllers.eid_args import eid_parser
+from utilities.controller_helpers import run_reporting_endpoint
+
+_parser = eid_parser
 
 
 class EidFacilityRegisteredSamples(Resource):
@@ -37,16 +36,18 @@ class EidFacilityRegisteredSamples(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID registered samples by requesting facility
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_registered_samples_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_registered_samples_service)
 
 
 class EidFacilityRegisteredSamplesByMonth(Resource):
@@ -64,16 +65,18 @@ class EidFacilityRegisteredSamplesByMonth(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID registered samples by month (facility)
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_registered_samples_by_month_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_registered_samples_by_month_service)
 
 
 class EidFacilityTestedSamples(Resource):
@@ -91,16 +94,18 @@ class EidFacilityTestedSamples(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID tested samples by requesting facility
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tested_samples_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tested_samples_service)
 
 
 class EidFacilityTestedSamplesByMonth(Resource):
@@ -118,16 +123,18 @@ class EidFacilityTestedSamplesByMonth(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID tested samples by month (facility)
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tested_samples_by_month_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tested_samples_by_month_service)
 
 
 class EidFacilityTestedSamplesByGender(Resource):
@@ -145,16 +152,18 @@ class EidFacilityTestedSamplesByGender(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID tested samples by gender and requesting facility
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tested_samples_by_gender_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tested_samples_by_gender_service)
 
 
 class EidFacilityTestedSamplesByGenderByMonth(Resource):
@@ -172,16 +181,18 @@ class EidFacilityTestedSamplesByGenderByMonth(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID tested samples by gender by month (facility)
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tested_samples_by_gender_by_month_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tested_samples_by_gender_by_month_service)
 
 
 class EidFacilityTatAvgByMonth(Resource):
@@ -199,16 +210,18 @@ class EidFacilityTatAvgByMonth(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID average TAT by month (facility)
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tat_avg_by_month_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tat_avg_by_month_service)
 
 
 class EidFacilityTatAvg(Resource):
@@ -226,16 +239,18 @@ class EidFacilityTatAvg(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID average TAT by requesting facility
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tat_avg_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tat_avg_service)
 
 
 class EidFacilityTatDaysByMonth(Resource):
@@ -253,16 +268,18 @@ class EidFacilityTatDaysByMonth(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID TAT day brackets by month (facility)
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tat_days_by_month_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tat_days_by_month_service)
 
 
 class EidFacilityTatDays(Resource):
@@ -280,16 +297,18 @@ class EidFacilityTatDays(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID TAT day brackets by requesting facility
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tat_days_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tat_days_service)
 
 
 class EidFacilityRejectedSamplesByMonth(Resource):
@@ -307,16 +326,18 @@ class EidFacilityRejectedSamplesByMonth(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID rejected samples by month (facility)
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_rejected_samples_by_month_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_rejected_samples_by_month_service)
 
 
 class EidFacilityRejectedSamples(Resource):
@@ -334,16 +355,18 @@ class EidFacilityRejectedSamples(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID rejected samples by requesting facility
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_rejected_samples_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_rejected_samples_service)
 
 
 class EidFacilityKeyIndicators(Resource):
@@ -361,16 +384,18 @@ class EidFacilityKeyIndicators(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID key indicators by requesting facility
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_key_indicators_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_key_indicators_service)
 
 
 class EidFacilityTestedSamplesByAge(Resource):
@@ -388,13 +413,15 @@ class EidFacilityTestedSamplesByAge(Resource):
             - $ref: '#/parameters/FacilityType'
             - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
+            - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
                 description: EID tested samples by age group (facility)
+            400:
+                description: Invalid parameter (lab_type, category or interval_dates)
             401:
                 description: Missing or invalid JWT token
             500:
                 description: An Error Occurred
         """
-        req_args = _parse_eid_common_args()
-        return _execute_eid_service(facility_tested_samples_by_age_service, req_args)
+        return run_reporting_endpoint(_parser.parse_args, facility_tested_samples_by_age_service)

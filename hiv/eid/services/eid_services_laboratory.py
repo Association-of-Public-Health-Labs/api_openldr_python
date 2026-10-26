@@ -1,3 +1,4 @@
+from hiv.eid.services.eid_common import parse_eid_params
 from utilities.utils import (
     PROCESS_COMMON_PARAMS_VL,
     YEAR, MONTH, DATE_PART, TOTAL_ALL,
@@ -54,6 +55,7 @@ def _gender_entities():
 # ---------------------------------------------------------------------------
 def tested_samples_by_month_service(req_args):
     """Tested samples grouped by year/month with positivity and gender splits."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -96,6 +98,7 @@ def tested_samples_by_month_service(req_args):
 # ---------------------------------------------------------------------------
 def registered_samples_by_month_service(req_args):
     """Registered samples grouped by year/month."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -129,6 +132,7 @@ def registered_samples_by_month_service(req_args):
 # ---------------------------------------------------------------------------
 def tested_samples_service(req_args):
     """Tested samples grouped by TestingFacilityName."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -167,6 +171,7 @@ def tested_samples_service(req_args):
 # ---------------------------------------------------------------------------
 def tat_service(req_args):
     """TAT with 6 hub-chain segments grouped by TestingFacilityName."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -224,9 +229,10 @@ _TAT_CATEGORIES = {
 
 def tat_samples_service(req_args):
     """TAT distribution: count samples in time brackets for a specific TAT category."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
-    category = req_args.get("category") or 1
+    category = parse_eid_params(req_args).category or 1
 
     if category not in _TAT_CATEGORIES:
         category = 1
@@ -271,6 +277,7 @@ def tat_samples_service(req_args):
 # ---------------------------------------------------------------------------
 def rejected_samples_service(req_args):
     """Rejected samples grouped by TestingFacilityName."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -306,6 +313,7 @@ def rejected_samples_service(req_args):
 # ---------------------------------------------------------------------------
 def rejected_samples_by_month_service(req_args):
     """Rejected samples grouped by year/month."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -345,6 +353,7 @@ _EQUIPMENT_TYPES = ["CAPCTM", "ALINITY", "M2000", "C6800", "PANTHER", "MPIMA", "
 
 def samples_by_equipment_service(req_args):
     """Equipment counts grouped by TestingFacilityName."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -386,6 +395,7 @@ def samples_by_equipment_service(req_args):
 # ---------------------------------------------------------------------------
 def samples_by_equipment_by_month_service(req_args):
     """Equipment counts grouped by year/month."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -428,6 +438,7 @@ def samples_by_equipment_by_month_service(req_args):
 # ---------------------------------------------------------------------------
 def sample_routes_service(req_args):
     """Requesting/testing facility pairs with coordinates."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
@@ -484,6 +495,7 @@ def sample_routes_service(req_args):
 # ---------------------------------------------------------------------------
 def sample_routes_viewport_service(req_args):
     """Sample routes filtered by viewport bounding box."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
     viewport = req_args.get("viewport")

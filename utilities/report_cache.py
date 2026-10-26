@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 logger = logging.getLogger(__name__)
 
 # Report endpoints whose default views are cached.
-CACHED_PREFIXES = ("/hiv/vl/", "/tb/gx/")
+CACHED_PREFIXES = ("/hiv/vl/", "/tb/gx/", "/hiv/eid/")
 
 # Filters a user picks (places, labs): their requests stay live, which keeps the cache small.
 USER_FILTERS = ("province", "district", "health_facility", "lab_code")
