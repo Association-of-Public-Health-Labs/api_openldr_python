@@ -27,8 +27,8 @@ LAB_TYPES = ("all", "conventional", "poc")
 POC_ANALYZER_CODES = ["MPIMA", "PIMA"]
 
 # ✱7: FinalResult is the definitive result for every sample (conventional and
-# PoC). Provisional mapping (2026-10-26), pending user confirmation. Values in
-# no class: INS, INST, "Insufficient sample", "Repeat Test".
+# PoC). Mapping confirmed by the user on 2026-10-26. Values in no class: INS,
+# INST, "Insufficient sample", "Repeat Test".
 RESULT_VALUES = {
     "positive": ["Positivo", "Reactive", "DTS"],
     "negative": ["Negativo", "Not Reactive", "Not Detected DBS", "NDET"],
@@ -38,17 +38,25 @@ RESULT_VALUES = {
 # FinalResult, so they stay pending.
 PENDING_RESULT_VALUES = ["NDT", "Nível de detecção baixo"]
 
-# Legacy buckets (spec §4.2). Any other code (COM, INLS, FDR, ...) is `other`.
+# Legacy rejection buckets (default variant: DashboardController and
+# LaboratoryController, and ClinicController.getRejectedSamplesByProvince).
+# Any other non-empty code (COM, INLS, FDR, REJOL, PRTLA, ...) is `other`.
 REJECTION_REASONS = [
-    ("repeat_test", ["REPIT", "SPUN2", "REJOL"]),
+    ("repeat_test", ["REPIT", "SPUN2"]),
     ("insufficient_sample", ["INS", "UNS"]),
     ("request_without_sample", ["RSA", "NSRP", "SDBSA"]),
-    ("technical_problems", ["ERRTC", "ACC", "PROBT", "PRTLA"]),
+    ("technical_problems", ["ERRTC", "ACC", "PROBT"]),
     ("overlapping_blood", ["SASOB"]),
     ("duplicate_registration", ["DUPRG"]),
     ("misidentified_sample", ["NAME"]),
     ("sample_over_30_days", ["AM30D"]),
 ]
+# ClinicController.getRejectedSamplesByMonth adds REJOL and PRTLA.
+_FACILITY_REJECTION_EXTRAS = {"repeat_test": ["REJOL"], "technical_problems": ["PRTLA"]}
+REJECTION_REASONS_FACILITY = [
+    (key, codes + _FACILITY_REJECTION_EXTRAS.get(key, [])) for key, codes in REJECTION_REASONS
+]
+_REJECTION_VARIANTS = {"default": REJECTION_REASONS, "facility": REJECTION_REASONS_FACILITY}
 
 # The six TAT segments, in the order of the legacy `category` 0-5.
 TAT_SEGMENTS = [
@@ -59,7 +67,6 @@ TAT_SEGMENTS = [
     ("lab_registration_analysis", EIDMaster.RegisteredDateTime, EIDMaster.AnalysisDateTime),
     ("analysis_validation", EIDMaster.AnalysisDateTime, EIDMaster.AuthorisedDateTime),
 ]
-TAT_EXCLUDED_LABS = ["PBC", "PEM", "UEM"]
 
 # ✱ (spec ✱8) the legacy lists missed C680A, M200C, PNTHC and ALNTB, all
 # present in production. Codes are compared trimmed ('PIMA ', 'MGIT ').
@@ -216,16 +223,26 @@ def pending_condition():
     )
 
 
-def rejection_reason_counts():
-    """The 8 coded buckets plus ``other``.
+def rejection_reason_counts(variant="default"):
+    """The 8 coded buckets plus ``other`` (9 labelled counts in every variant).
+
+    ``variant="default"``: the Dashboard and Laboratory routes and
+    ClinicController.getRejectedSamplesByProvince (``facilities/rejected_samples/``).
+    ``variant="facility"``: ClinicController.getRejectedSamplesByMonth
+    (``facilities/rejected_samples_by_month/``), where REJOL is a repeat test
+    and PRTLA a technical problem.
 
     ``other`` is a non-empty rejection code that is in no bucket (COM, INLS,
     ...), as in the legacy. A row rejected only by description counts in
     ``rejected_condition()`` totals but in no reason column.
     """
+    try:
+        reasons = _REJECTION_VARIANTS[variant]
+    except KeyError:
+        raise ValueError(f"unknown rejection reason variant: {variant!r}") from None
     code = _trimmed(EIDMaster.LIMSRejectionCode)
-    bucketed = [c for _, codes in REJECTION_REASONS for c in codes]
-    counts = [count_where(code.in_(codes), key) for key, codes in REJECTION_REASONS]
+    bucketed = [c for _, codes in reasons for c in codes]
+    counts = [count_where(code.in_(codes), key) for key, codes in reasons]
     counts.append(
         count_where(
             and_(_non_empty_trimmed(EIDMaster.LIMSRejectionCode), code.not_in(bucketed)),
@@ -242,8 +259,7 @@ def _days(start, end):
     return func.datediff(text("day"), start, end)
 
 
-def tat_filters():
-    """Legacy TAT quality filters (spec §4.2)."""
+def _hub_before_lab():
     hub_first = func.isnull(
         func.isnull(EIDMaster.LIMSPreReg_ReceivedDateTime, EIDMaster.LIMSPreReg_RegistrationDateTime),
         "1900-01-01",
@@ -252,14 +268,95 @@ def tat_filters():
         func.isnull(EIDMaster.ReceivedDateTime, EIDMaster.RegisteredDateTime),
         "2100-01-01",
     )
-    return [
-        hub_first < lab_first,
-        _days(EIDMaster.SpecimenDatetime, EIDMaster.LIMSPreReg_RegistrationDateTime) >= 0,
-        _days(EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ReceivedDateTime).between(0, 90),
-        _days(EIDMaster.RegisteredDateTime, EIDMaster.AnalysisDateTime) <= 30,
-        conventional_condition(),
-        EIDMaster.TestingFacilityCode.not_in(TAT_EXCLUDED_LABS),
-    ]
+    return hub_first < lab_first
+
+
+def tat_filters(variant):
+    """The TAT quality filters of one legacy route family (parity, R12).
+
+    Each variant reproduces the WHERE clauses of the legacy openldr-api
+    routes (src/modules/eid/controllers), apart from the date window and
+    location filters, which the routes add:
+
+    - ``"summary"``: DashboardController.getPCRTurnAroundTime
+      (``summary/tat/``). ``IsPoc = 'No'``; collection -> lab reception >= 0;
+      hub dates before lab dates; hub registration < lab reception; hub
+      reception < lab registration. No day limits, no lab exclusion.
+    - ``"summary_tat_samples"``: DashboardController.getPCRTurnAroundTimeSamples
+      (``summary/tat_samples/``). As ``"summary"`` without
+      ``LIMSPreReg_ReceivedDateTime < RegisteredDateTime``.
+    - ``"lab_tat"``: LaboratoryController.getTatByConventional
+      (``laboratories/tat/``). Not rejected (``LIMSRejectionCode`` NULL or
+      ''); the conventional rule; a testing lab name; hub dates before lab
+      dates; hub registration -> lab reception 0-90 days; registration ->
+      analysis <= 30 days; collection -> hub registration >= 0;
+      ``TestingFacilityCode NOT IN ('PBC', 'PEM')``.
+    - ``"lab_tat_samples"``: LaboratoryController.getTurnAroundTimeSamples
+      (``laboratories/tat_samples/``). ``IsPoc = 'No'``; a testing lab name;
+      hub dates before lab dates; registration -> analysis <= 30 days;
+      hub registration -> lab reception >= 0 (no 90-day limit); collection
+      -> hub registration >= 0; ``TestingFacilityCode NOT IN ('PBC', 'UEM')``.
+    - ``"facility_tat_days"``: ClinicController.getTatDaysSamplesByMonth and
+      getTatDaysSamplesByProvince (``facilities/tat_days*``). ``IsPoc = 'No'``;
+      hub dates before lab dates; ``TestingFacilityCode <> 'PBC'``;
+      registration -> analysis <= 30 days.
+    - ``"facility_tat_avg"``: ClinicController.getTatAvgSamplesByMonth and
+      getTatAvgSamplesByProvince (``facilities/tat_avg*``). As
+      ``"facility_tat_days"`` plus hub registration -> lab reception >= 0 and
+      collection -> hub registration >= 0.
+
+    The facility routes also drop NULL Requesting province/district/facility
+    names; that belongs to the route's location filters.
+    """
+    not_poc = EIDMaster.IsPoc == "No"
+    hub_order = _hub_before_lab()
+    hub_to_lab = _days(EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ReceivedDateTime)
+    collection_to_hub = _days(EIDMaster.SpecimenDatetime, EIDMaster.LIMSPreReg_RegistrationDateTime) >= 0
+    analysis_within_30 = _days(EIDMaster.RegisteredDateTime, EIDMaster.AnalysisDateTime) <= 30
+    has_lab_name = EIDMaster.TestingFacilityName.is_not(None)
+
+    if variant in ("summary", "summary_tat_samples"):
+        filters = [
+            not_poc,
+            _days(EIDMaster.SpecimenDatetime, EIDMaster.ReceivedDateTime) >= 0,
+            hub_order,
+            EIDMaster.LIMSPreReg_RegistrationDateTime < EIDMaster.ReceivedDateTime,
+        ]
+        if variant == "summary":
+            filters.append(EIDMaster.LIMSPreReg_ReceivedDateTime < EIDMaster.RegisteredDateTime)
+        return filters
+    if variant == "lab_tat":
+        return [
+            or_(EIDMaster.LIMSRejectionCode.is_(None), EIDMaster.LIMSRejectionCode == ""),
+            conventional_condition(),
+            has_lab_name,
+            hub_order,
+            hub_to_lab.between(0, 90),
+            analysis_within_30,
+            collection_to_hub,
+            EIDMaster.TestingFacilityCode.not_in(["PBC", "PEM"]),
+        ]
+    if variant == "lab_tat_samples":
+        return [
+            not_poc,
+            has_lab_name,
+            hub_order,
+            analysis_within_30,
+            hub_to_lab >= 0,
+            collection_to_hub,
+            EIDMaster.TestingFacilityCode.not_in(["PBC", "UEM"]),
+        ]
+    if variant in ("facility_tat_days", "facility_tat_avg"):
+        filters = [
+            not_poc,
+            hub_order,
+            EIDMaster.TestingFacilityCode != "PBC",
+            analysis_within_30,
+        ]
+        if variant == "facility_tat_avg":
+            filters += [hub_to_lab >= 0, collection_to_hub]
+        return filters
+    raise ValueError(f"unknown TAT filter variant: {variant!r}")
 
 
 def tat_averages(zero_as_one):

@@ -116,14 +116,48 @@ def test_rejection_reasons_buckets(eid):
 
 def test_rejection_reason_codes(eid):
     reasons = dict(eid.REJECTION_REASONS)
-    assert reasons["repeat_test"] == ["REPIT", "SPUN2", "REJOL"]
+    assert reasons["repeat_test"] == ["REPIT", "SPUN2"]
     assert reasons["insufficient_sample"] == ["INS", "UNS"]
     assert reasons["request_without_sample"] == ["RSA", "NSRP", "SDBSA"]
-    assert reasons["technical_problems"] == ["ERRTC", "ACC", "PROBT", "PRTLA"]
+    assert reasons["technical_problems"] == ["ERRTC", "ACC", "PROBT"]
     assert reasons["overlapping_blood"] == ["SASOB"]
     assert reasons["duplicate_registration"] == ["DUPRG"]
     assert reasons["misidentified_sample"] == ["NAME"]
     assert reasons["sample_over_30_days"] == ["AM30D"]
+    facility = dict(eid.REJECTION_REASONS_FACILITY)
+    assert facility["repeat_test"] == ["REPIT", "SPUN2", "REJOL"]
+    assert facility["technical_problems"] == ["ERRTC", "ACC", "PROBT", "PRTLA"]
+    assert {k: v for k, v in facility.items() if k not in ("repeat_test", "technical_problems")} == {
+        k: v for k, v in reasons.items() if k not in ("repeat_test", "technical_problems")
+    }
+
+
+@pytest.mark.parametrize("variant", ["default", "facility"])
+def test_rejection_variants_keep_the_9_labels(eid, variant):
+    s = select_sql(eid.rejection_reason_counts(variant))
+    labels = [k for k, _ in eid.REJECTION_REASONS] + ["other"]
+    assert [c.name for c in eid.rejection_reason_counts(variant)] == labels
+    for label in labels:
+        assert f"AS {label}" in s
+
+
+def test_rejol_is_other_by_default(eid):
+    counts = {c.name: to_sql(c) for c in eid.rejection_reason_counts()}
+    assert "'REJOL'" not in counts["repeat_test"] and "'PRTLA'" not in counts["technical_problems"]
+    assert "'REJOL'" not in counts["other"] and "'PRTLA'" not in counts["other"]  # NOT IN list lacks them
+    assert "NOT IN ('REPIT', 'SPUN2', 'INS', 'UNS'" in counts["other"]
+
+
+def test_rejol_is_repeat_test_on_facility(eid):
+    counts = {c.name: to_sql(c) for c in eid.rejection_reason_counts("facility")}
+    assert "IN ('REPIT', 'SPUN2', 'REJOL')" in counts["repeat_test"]
+    assert "IN ('ERRTC', 'ACC', 'PROBT', 'PRTLA')" in counts["technical_problems"]
+    assert "NOT IN ('REPIT', 'SPUN2', 'REJOL', 'INS'" in counts["other"]
+
+
+def test_rejection_unknown_variant(eid):
+    with pytest.raises(ValueError):
+        eid.rejection_reason_counts("other")
 
 
 def test_rejection_reason_counts_has_other(eid):
@@ -144,7 +178,7 @@ def test_unbucketed_code_counts_as_other(eid):
         "count(CASE WHEN ([EIDMaster].[LIMSRejectionCode] IS NOT NULL AND "
         "ltrim(rtrim([EIDMaster].[LIMSRejectionCode])) != '' AND "
     )
-    assert "ltrim(rtrim([EIDMaster].[LIMSRejectionCode])) NOT IN ('REPIT', 'SPUN2', 'REJOL', 'INS', 'UNS'" in other
+    assert "ltrim(rtrim([EIDMaster].[LIMSRejectionCode])) NOT IN ('REPIT', 'SPUN2', 'INS', 'UNS'" in other
     assert "AS other" in select_sql(eid.rejection_reason_counts()[-1:])
     assert "'COM'" not in other
 
@@ -169,25 +203,86 @@ def test_tat_segments(eid):
     ]
 
 
-def test_tat_filters_exclude_pbc_pem_uem(eid):
-    s = sql_of(*eid.tat_filters())
-    assert "[EIDMaster].[TestingFacilityCode] NOT IN ('PBC', 'PEM', 'UEM')" in s
+HUB_ORDER = (
+    "isnull(isnull([EIDMaster].[LIMSPreReg_ReceivedDateTime], "
+    "[EIDMaster].[LIMSPreReg_RegistrationDateTime]), '1900-01-01') < "
+    "isnull(isnull([EIDMaster].[ReceivedDateTime], [EIDMaster].[RegisteredDateTime]), '2100-01-01')"
+)
+COLLECTION_TO_LAB = "datediff(day, [EIDMaster].[SpecimenDatetime], [EIDMaster].[ReceivedDateTime]) >= 0"
+HUB_REG_BEFORE_LAB = "[EIDMaster].[LIMSPreReg_RegistrationDateTime] < [EIDMaster].[ReceivedDateTime]"
+HUB_REC_BEFORE_REG = "[EIDMaster].[LIMSPreReg_ReceivedDateTime] < [EIDMaster].[RegisteredDateTime]"
+HUB_TO_LAB_90 = (
+    "datediff(day, [EIDMaster].[LIMSPreReg_RegistrationDateTime], [EIDMaster].[ReceivedDateTime]) "
+    "BETWEEN 0 AND 90"
+)
+HUB_TO_LAB_0 = "datediff(day, [EIDMaster].[LIMSPreReg_RegistrationDateTime], [EIDMaster].[ReceivedDateTime]) >= 0"
+ANALYSIS_30 = "datediff(day, [EIDMaster].[RegisteredDateTime], [EIDMaster].[AnalysisDateTime]) <= 30"
+COLLECTION_TO_HUB = "datediff(day, [EIDMaster].[SpecimenDatetime], [EIDMaster].[LIMSPreReg_RegistrationDateTime]) >= 0"
+LAB_NAME = "[EIDMaster].[TestingFacilityName] IS NOT NULL"
+NOT_REJECTED_CODE = "[EIDMaster].[LIMSRejectionCode] IS NULL OR [EIDMaster].[LIMSRejectionCode] = ''"
 
 
-def test_tat_filters_quality_rules(eid):
-    s = sql_of(*eid.tat_filters())
-    assert (
-        "isnull(isnull([EIDMaster].[LIMSPreReg_ReceivedDateTime], "
-        "[EIDMaster].[LIMSPreReg_RegistrationDateTime]), '1900-01-01') < "
-        "isnull(isnull([EIDMaster].[ReceivedDateTime], [EIDMaster].[RegisteredDateTime]), '2100-01-01')"
-    ) in s
-    assert "datediff(day, [EIDMaster].[SpecimenDatetime], [EIDMaster].[LIMSPreReg_RegistrationDateTime]) >= 0" in s
-    assert (
-        "datediff(day, [EIDMaster].[LIMSPreReg_RegistrationDateTime], [EIDMaster].[ReceivedDateTime]) "
-        "BETWEEN 0 AND 90"
-    ) in s
-    assert "datediff(day, [EIDMaster].[RegisteredDateTime], [EIDMaster].[AnalysisDateTime]) <= 30" in s
-    assert sql_of(eid.conventional_condition()) in s
+def test_tat_filters_summary(eid):
+    s = sql_of(*eid.tat_filters("summary"))
+    for clause in ("[EIDMaster].[IsPoc] = 'No'", COLLECTION_TO_LAB, HUB_ORDER, HUB_REG_BEFORE_LAB, HUB_REC_BEFORE_REG):
+        assert clause in s
+    for absent in ("PBC", "<= 30", "BETWEEN 0 AND 90", "LIMSAnalyzerCode", "LIMSRejectionCode", "TestingFacility"):
+        assert absent not in s
+
+
+def test_tat_filters_summary_tat_samples(eid):
+    s = sql_of(*eid.tat_filters("summary_tat_samples"))
+    for clause in ("[EIDMaster].[IsPoc] = 'No'", COLLECTION_TO_LAB, HUB_ORDER, HUB_REG_BEFORE_LAB):
+        assert clause in s
+    assert HUB_REC_BEFORE_REG not in s
+    for absent in ("PBC", "<= 30", "BETWEEN 0 AND 90", "LIMSAnalyzerCode", "TestingFacility"):
+        assert absent not in s
+
+
+def test_tat_filters_lab_tat(eid):
+    s = sql_of(*eid.tat_filters("lab_tat"))
+    for clause in (
+        NOT_REJECTED_CODE, sql_of(eid.conventional_condition()), LAB_NAME, HUB_ORDER,
+        HUB_TO_LAB_90, ANALYSIS_30, COLLECTION_TO_HUB,
+        "[EIDMaster].[TestingFacilityCode] NOT IN ('PBC', 'PEM')",
+    ):
+        assert clause in s
+    assert "UEM" not in s and HUB_REG_BEFORE_LAB not in s and COLLECTION_TO_LAB not in s
+
+
+def test_tat_filters_lab_tat_samples(eid):
+    s = sql_of(*eid.tat_filters("lab_tat_samples"))
+    for clause in (
+        "[EIDMaster].[IsPoc] = 'No'", LAB_NAME, HUB_ORDER, ANALYSIS_30, HUB_TO_LAB_0,
+        COLLECTION_TO_HUB, "[EIDMaster].[TestingFacilityCode] NOT IN ('PBC', 'UEM')",
+    ):
+        assert clause in s
+    for absent in ("BETWEEN 0 AND 90", "PEM", "LIMSAnalyzerCode", "LIMSRejectionCode"):
+        assert absent not in s
+
+
+def test_tat_filters_facility_tat_days(eid):
+    s = sql_of(*eid.tat_filters("facility_tat_days"))
+    for clause in ("[EIDMaster].[IsPoc] = 'No'", HUB_ORDER, "[EIDMaster].[TestingFacilityCode] != 'PBC'", ANALYSIS_30):
+        assert clause in s
+    for absent in ("PEM", "UEM", "NOT IN", "BETWEEN", HUB_TO_LAB_0, COLLECTION_TO_HUB, "LIMSRejectionCode", "TestingFacilityName"):
+        assert absent not in s
+
+
+def test_tat_filters_facility_tat_avg(eid):
+    s = sql_of(*eid.tat_filters("facility_tat_avg"))
+    for clause in (
+        "[EIDMaster].[IsPoc] = 'No'", HUB_ORDER, "[EIDMaster].[TestingFacilityCode] != 'PBC'",
+        ANALYSIS_30, HUB_TO_LAB_0, COLLECTION_TO_HUB,
+    ):
+        assert clause in s
+    for absent in ("PEM", "UEM", "BETWEEN", "LIMSAnalyzerCode", "LIMSRejectionCode"):
+        assert absent not in s
+
+
+def test_tat_filters_unknown_variant(eid):
+    with pytest.raises(ValueError):
+        eid.tat_filters("default")
 
 
 def test_tat_averages(eid):
