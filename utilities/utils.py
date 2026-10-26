@@ -1463,7 +1463,7 @@ def EQUIPMENT_COUNT(Model, equipment_name):
     Parameters
     ----------
     Model : sqlalchemy.Model
-        The model class with ResultLIMSAnalyzerCode column
+        The model class with LIMSAnalyzerCode column
     equipment_name : str
         Equipment code (e.g., "CAPCTM", "ALINITY", "M2000")
 
@@ -1472,7 +1472,7 @@ def EQUIPMENT_COUNT(Model, equipment_name):
     sqlalchemy.sql.expression
         A CASE expression counting matching records
     """
-    return func.count(case((Model.ResultLIMSAnalyzerCode == equipment_name, 1)))
+    return func.count(case((Model.LIMSAnalyzerCode == equipment_name, 1)))
 
 
 def PROCESS_COMMON_PARAMS_VL(req_args):

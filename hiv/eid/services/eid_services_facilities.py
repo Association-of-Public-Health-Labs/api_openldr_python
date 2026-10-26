@@ -9,15 +9,15 @@ from hiv.eid.models.eid_master_model import EIDMaster
 
 
 def _build_facility_filters(facilities, facility_type):
-    """Build facility filter conditions based on facility_type (ResultRequesting* columns)."""
+    """Build facility filter conditions based on facility_type (Requesting* columns)."""
     if not facilities:
         return []
     if facility_type == "province":
-        return [EIDMaster.ResultRequestingProvinceName.in_(facilities)]
+        return [EIDMaster.RequestingProvinceName.in_(facilities)]
     elif facility_type == "district":
-        return [EIDMaster.ResultRequestingDistrictName.in_(facilities)]
+        return [EIDMaster.RequestingDistrictName.in_(facilities)]
     elif facility_type == "health_facility":
-        return [EIDMaster.ResultRequestingFacilityName.in_(facilities)]
+        return [EIDMaster.RequestingFacilityName.in_(facilities)]
     return []
 
 
@@ -25,18 +25,18 @@ def _get_group_column(disaggregation, facility_type):
     """Determine the grouping column based on disaggregation and facility_type."""
     if disaggregation:
         if facility_type == "province":
-            return EIDMaster.ResultRequestingDistrictName
+            return EIDMaster.RequestingDistrictName
         elif facility_type == "district":
-            return EIDMaster.ResultRequestingFacilityName
+            return EIDMaster.RequestingFacilityName
         else:
-            return EIDMaster.ResultRequestingProvinceName
+            return EIDMaster.RequestingProvinceName
     else:
         if facility_type == "province":
-            return EIDMaster.ResultRequestingProvinceName
+            return EIDMaster.RequestingProvinceName
         elif facility_type == "district":
-            return EIDMaster.ResultRequestingDistrictName
+            return EIDMaster.RequestingDistrictName
         else:
-            return EIDMaster.ResultRequestingFacilityName
+            return EIDMaster.RequestingFacilityName
 
 
 def _year_month_group_order(date_field):
@@ -76,7 +76,7 @@ def facility_registered_samples_service(req_args):
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
-    filters = [EIDMaster.ResultRegisteredDateTime.between(dates[0], dates[1])]
+    filters = [EIDMaster.RegisteredDateTime.between(dates[0], dates[1])]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
@@ -109,11 +109,11 @@ def facility_registered_samples_by_month_service(req_args):
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
-    filters = [EIDMaster.ResultRegisteredDateTime.between(dates[0], dates[1])]
+    filters = [EIDMaster.RegisteredDateTime.between(dates[0], dates[1])]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultRegisteredDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.RegisteredDateTime)
 
     try:
         query = (
@@ -143,8 +143,8 @@ def facility_tested_samples_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -183,13 +183,13 @@ def facility_tested_samples_by_month_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
 
     try:
         query = (
@@ -225,8 +225,8 @@ def facility_tested_samples_by_gender_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -265,13 +265,13 @@ def facility_tested_samples_by_gender_by_month_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
 
     try:
         query = (
@@ -305,24 +305,24 @@ def facility_tat_avg_by_month_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
 
     try:
         query = (
             EIDMaster.query.with_entities(
                 *group_cols,
-                DATE_DIFF_AVG([EIDMaster.ResultSpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime]).label("collection_receiveHub"),
+                DATE_DIFF_AVG([EIDMaster.SpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime]).label("collection_receiveHub"),
                 DATE_DIFF_AVG([EIDMaster.LIMSPreReg_ReceivedDateTime, EIDMaster.LIMSPreReg_RegistrationDateTime]).label("receiveHub_registrationHub"),
-                DATE_DIFF_AVG([EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ResultReceivedDatetime]).label("registrationHub_receiveLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultReceivedDatetime, EIDMaster.ResultRegisteredDateTime]).label("receiveLab_registrationLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultRegisteredDateTime, EIDMaster.ResultAnalysisDateTime]).label("registrationLab_analyseLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultAnalysisDateTime, EIDMaster.ResultAuthorisedDateTime]).label("analyseLab_validationLab"),
+                DATE_DIFF_AVG([EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ReceivedDateTime]).label("registrationHub_receiveLab"),
+                DATE_DIFF_AVG([EIDMaster.ReceivedDateTime, EIDMaster.RegisteredDateTime]).label("receiveLab_registrationLab"),
+                DATE_DIFF_AVG([EIDMaster.RegisteredDateTime, EIDMaster.AnalysisDateTime]).label("registrationLab_analyseLab"),
+                DATE_DIFF_AVG([EIDMaster.AnalysisDateTime, EIDMaster.AuthorisedDateTime]).label("analyseLab_validationLab"),
             )
             .filter(and_(*filters))
             .group_by(*group_cols)
@@ -354,8 +354,8 @@ def facility_tat_avg_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -366,12 +366,12 @@ def facility_tat_avg_service(req_args):
         query = (
             EIDMaster.query.with_entities(
                 group_col.label("requesting_facility"),
-                DATE_DIFF_AVG([EIDMaster.ResultSpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime]).label("collection_receiveHub"),
+                DATE_DIFF_AVG([EIDMaster.SpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime]).label("collection_receiveHub"),
                 DATE_DIFF_AVG([EIDMaster.LIMSPreReg_ReceivedDateTime, EIDMaster.LIMSPreReg_RegistrationDateTime]).label("receiveHub_registrationHub"),
-                DATE_DIFF_AVG([EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ResultReceivedDatetime]).label("registrationHub_receiveLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultReceivedDatetime, EIDMaster.ResultRegisteredDateTime]).label("receiveLab_registrationLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultRegisteredDateTime, EIDMaster.ResultAnalysisDateTime]).label("registrationLab_analyseLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultAnalysisDateTime, EIDMaster.ResultAuthorisedDateTime]).label("analyseLab_validationLab"),
+                DATE_DIFF_AVG([EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ReceivedDateTime]).label("registrationHub_receiveLab"),
+                DATE_DIFF_AVG([EIDMaster.ReceivedDateTime, EIDMaster.RegisteredDateTime]).label("receiveLab_registrationLab"),
+                DATE_DIFF_AVG([EIDMaster.RegisteredDateTime, EIDMaster.AnalysisDateTime]).label("registrationLab_analyseLab"),
+                DATE_DIFF_AVG([EIDMaster.AnalysisDateTime, EIDMaster.AuthorisedDateTime]).label("analyseLab_validationLab"),
             )
             .filter(and_(*filters))
             .group_by(group_col)
@@ -403,14 +403,14 @@ def facility_tat_days_by_month_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
-    diff_expr = func.datediff(text("day"), EIDMaster.ResultSpecimenDatetime, EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
+    diff_expr = func.datediff(text("day"), EIDMaster.SpecimenDatetime, EIDMaster.AnalysisDateTime)
 
     try:
         query = (
@@ -447,14 +447,14 @@ def facility_tat_days_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
     group_col = _get_group_column(disaggregation, facility_type)
-    diff_expr = func.datediff(text("day"), EIDMaster.ResultSpecimenDatetime, EIDMaster.ResultAnalysisDateTime)
+    diff_expr = func.datediff(text("day"), EIDMaster.SpecimenDatetime, EIDMaster.AnalysisDateTime)
 
     try:
         query = (
@@ -491,16 +491,13 @@ def facility_rejected_samples_by_month_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        or_(
-            and_(EIDMaster.ResultLIMSRejectionCode.is_not(None), EIDMaster.ResultLIMSRejectionCode != ""),
-            and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
-        ),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
 
     try:
         query = (
@@ -530,11 +527,8 @@ def facility_rejected_samples_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        or_(
-            and_(EIDMaster.ResultLIMSRejectionCode.is_not(None), EIDMaster.ResultLIMSRejectionCode != ""),
-            and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
-        ),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -568,7 +562,7 @@ def facility_key_indicators_service(req_args):
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
-    filters = [EIDMaster.ResultRegisteredDateTime.between(dates[0], dates[1])]
+    filters = [EIDMaster.RegisteredDateTime.between(dates[0], dates[1])]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
@@ -579,12 +573,9 @@ def facility_key_indicators_service(req_args):
             EIDMaster.query.with_entities(
                 group_col.label("requesting_facility"),
                 TOTAL_ALL.label("registered"),
-                func.count(case((EIDMaster.ResultAnalysisDateTime.is_not(None), 1))).label("tested"),
-                func.count(case((or_(
-                    and_(EIDMaster.ResultLIMSRejectionCode.is_not(None), EIDMaster.ResultLIMSRejectionCode != ""),
-                    and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
-                ), 1))).label("rejected"),
-                func.count(case((EIDMaster.ResultAnalysisDateTime.is_(None), 1))).label("pending"),
+                func.count(case((EIDMaster.AnalysisDateTime.is_not(None), 1))).label("tested"),
+                func.count(case((and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""), 1))).label("rejected"),
+                func.count(case((EIDMaster.AnalysisDateTime.is_(None), 1))).label("pending"),
                 POSITIVITY(EIDMaster.PCR_Result, "Positive").label("positive"),
                 POSITIVITY(EIDMaster.PCR_Result, "Negative").label("negative"),
             )
@@ -615,13 +606,13 @@ def facility_tested_samples_by_age_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
 
     # EID age groups based on AgeInDays:
     # 0-2 months (~0-60 days), 2-9 months (~61-270 days),
@@ -638,7 +629,7 @@ def facility_tested_samples_by_age_service(req_args):
         # Use subquery to work around SQL Server parameterized CASE in GROUP BY
         subq = (
             db.session.query(
-                EIDMaster.ResultAnalysisDateTime,
+                EIDMaster.AnalysisDateTime,
                 age_case,
             )
             .filter(and_(*filters))
@@ -646,21 +637,21 @@ def facility_tested_samples_by_age_service(req_args):
         )
         query = (
             db.session.query(
-                func.year(subq.c.ResultAnalysisDateTime).label("year"),
-                func.month(subq.c.ResultAnalysisDateTime),
-                func.datename(text("month"), subq.c.ResultAnalysisDateTime),
+                func.year(subq.c.AnalysisDateTime).label("year"),
+                func.month(subq.c.AnalysisDateTime),
+                func.datename(text("month"), subq.c.AnalysisDateTime),
                 subq.c.age_group,
                 func.count().label("total"),
             )
             .group_by(
-                func.year(subq.c.ResultAnalysisDateTime),
-                func.month(subq.c.ResultAnalysisDateTime),
-                func.datename(text("month"), subq.c.ResultAnalysisDateTime),
+                func.year(subq.c.AnalysisDateTime),
+                func.month(subq.c.AnalysisDateTime),
+                func.datename(text("month"), subq.c.AnalysisDateTime),
                 subq.c.age_group,
             )
             .order_by(
-                func.year(subq.c.ResultAnalysisDateTime),
-                func.month(subq.c.ResultAnalysisDateTime),
+                func.year(subq.c.AnalysisDateTime),
+                func.month(subq.c.AnalysisDateTime),
                 subq.c.age_group,
             )
         )

@@ -12,11 +12,11 @@ def _build_facility_filters(facilities, facility_type):
     if not facilities:
         return []
     if facility_type == "province":
-        return [EIDMaster.ResultRequestingProvinceName.in_(facilities)]
+        return [EIDMaster.RequestingProvinceName.in_(facilities)]
     elif facility_type == "district":
-        return [EIDMaster.ResultRequestingDistrictName.in_(facilities)]
+        return [EIDMaster.RequestingDistrictName.in_(facilities)]
     elif facility_type == "health_facility":
-        return [EIDMaster.ResultRequestingFacilityName.in_(facilities)]
+        return [EIDMaster.RequestingFacilityName.in_(facilities)]
     return []
 
 
@@ -58,13 +58,13 @@ def tested_samples_by_month_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
 
     try:
         query = (
@@ -99,11 +99,11 @@ def registered_samples_by_month_service(req_args):
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
-    filters = [EIDMaster.ResultRegisteredDateTime.between(dates[0], dates[1])]
+    filters = [EIDMaster.RegisteredDateTime.between(dates[0], dates[1])]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultRegisteredDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.RegisteredDateTime)
 
     try:
         query = (
@@ -128,13 +128,13 @@ def registered_samples_by_month_service(req_args):
 # 3. tested_samples_service
 # ---------------------------------------------------------------------------
 def tested_samples_service(req_args):
-    """Tested samples grouped by ResultTestingFacilityName."""
+    """Tested samples grouped by TestingFacilityName."""
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -142,13 +142,13 @@ def tested_samples_service(req_args):
     try:
         query = (
             EIDMaster.query.with_entities(
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
+                EIDMaster.TestingFacilityName.label("testing_facility"),
                 TOTAL_ALL,
                 *_positivity_entities(),
             )
             .filter(and_(*filters))
-            .group_by(EIDMaster.ResultTestingFacilityName)
-            .order_by(EIDMaster.ResultTestingFacilityName)
+            .group_by(EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName)
         )
         data = query.all()
         return [
@@ -166,13 +166,13 @@ def tested_samples_service(req_args):
 # 4. tat_service
 # ---------------------------------------------------------------------------
 def tat_service(req_args):
-    """TAT with 6 hub-chain segments grouped by ResultTestingFacilityName."""
+    """TAT with 6 hub-chain segments grouped by TestingFacilityName."""
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -180,17 +180,17 @@ def tat_service(req_args):
     try:
         query = (
             EIDMaster.query.with_entities(
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                DATE_DIFF_AVG([EIDMaster.ResultSpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime]).label("collection_receiveHub"),
+                EIDMaster.TestingFacilityName.label("testing_facility"),
+                DATE_DIFF_AVG([EIDMaster.SpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime]).label("collection_receiveHub"),
                 DATE_DIFF_AVG([EIDMaster.LIMSPreReg_ReceivedDateTime, EIDMaster.LIMSPreReg_RegistrationDateTime]).label("receiveHub_registrationHub"),
-                DATE_DIFF_AVG([EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ResultReceivedDatetime]).label("registrationHub_receiveLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultReceivedDatetime, EIDMaster.ResultRegisteredDateTime]).label("receiveLab_registrationLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultRegisteredDateTime, EIDMaster.ResultAnalysisDateTime]).label("registrationLab_analyseLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultAnalysisDateTime, EIDMaster.ResultAuthorisedDateTime]).label("analyseLab_validationLab"),
+                DATE_DIFF_AVG([EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ReceivedDateTime]).label("registrationHub_receiveLab"),
+                DATE_DIFF_AVG([EIDMaster.ReceivedDateTime, EIDMaster.RegisteredDateTime]).label("receiveLab_registrationLab"),
+                DATE_DIFF_AVG([EIDMaster.RegisteredDateTime, EIDMaster.AnalysisDateTime]).label("registrationLab_analyseLab"),
+                DATE_DIFF_AVG([EIDMaster.AnalysisDateTime, EIDMaster.AuthorisedDateTime]).label("analyseLab_validationLab"),
             )
             .filter(and_(*filters))
-            .group_by(EIDMaster.ResultTestingFacilityName)
-            .order_by(EIDMaster.ResultTestingFacilityName)
+            .group_by(EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName)
         )
         data = query.all()
         return [
@@ -213,12 +213,12 @@ def tat_service(req_args):
 # 5. tat_samples_service
 # ---------------------------------------------------------------------------
 _TAT_CATEGORIES = {
-    1: ("collection_receiveHub", EIDMaster.ResultSpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime),
+    1: ("collection_receiveHub", EIDMaster.SpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime),
     2: ("receiveHub_registrationHub", EIDMaster.LIMSPreReg_ReceivedDateTime, EIDMaster.LIMSPreReg_RegistrationDateTime),
-    3: ("registrationHub_receiveLab", EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ResultReceivedDatetime),
-    4: ("receiveLab_registrationLab", EIDMaster.ResultReceivedDatetime, EIDMaster.ResultRegisteredDateTime),
-    5: ("registrationLab_analyseLab", EIDMaster.ResultRegisteredDateTime, EIDMaster.ResultAnalysisDateTime),
-    6: ("analyseLab_validationLab", EIDMaster.ResultAnalysisDateTime, EIDMaster.ResultAuthorisedDateTime),
+    3: ("registrationHub_receiveLab", EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ReceivedDateTime),
+    4: ("receiveLab_registrationLab", EIDMaster.ReceivedDateTime, EIDMaster.RegisteredDateTime),
+    5: ("registrationLab_analyseLab", EIDMaster.RegisteredDateTime, EIDMaster.AnalysisDateTime),
+    6: ("analyseLab_validationLab", EIDMaster.AnalysisDateTime, EIDMaster.AuthorisedDateTime),
 }
 
 
@@ -235,8 +235,8 @@ def tat_samples_service(req_args):
     diff_expr = func.datediff(text("day"), field_start, field_end)
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -270,16 +270,13 @@ def tat_samples_service(req_args):
 # 6. rejected_samples_service
 # ---------------------------------------------------------------------------
 def rejected_samples_service(req_args):
-    """Rejected samples grouped by ResultTestingFacilityName."""
+    """Rejected samples grouped by TestingFacilityName."""
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        or_(
-            and_(EIDMaster.ResultLIMSRejectionCode.is_not(None), EIDMaster.ResultLIMSRejectionCode != ""),
-            and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
-        ),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     
@@ -288,12 +285,12 @@ def rejected_samples_service(req_args):
     try:
         query = (
             EIDMaster.query.with_entities(
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
+                EIDMaster.TestingFacilityName.label("testing_facility"),
                 TOTAL_ALL,
             )
             .filter(and_(*filters))
-            .group_by(EIDMaster.ResultTestingFacilityName)
-            .order_by(EIDMaster.ResultTestingFacilityName)
+            .group_by(EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName)
         )
         data = query.all()
         return [
@@ -313,16 +310,13 @@ def rejected_samples_by_month_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        or_(
-            and_(EIDMaster.ResultLIMSRejectionCode.is_not(None), EIDMaster.ResultLIMSRejectionCode != ""),
-            and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
-        ),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
 
     try:
         query = (
@@ -350,13 +344,13 @@ _EQUIPMENT_TYPES = ["CAPCTM", "ALINITY", "M2000", "C6800", "PANTHER", "MPIMA", "
 
 
 def samples_by_equipment_service(req_args):
-    """Equipment counts grouped by ResultTestingFacilityName."""
+    """Equipment counts grouped by TestingFacilityName."""
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -368,12 +362,12 @@ def samples_by_equipment_service(req_args):
     try:
         query = (
             EIDMaster.query.with_entities(
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
+                EIDMaster.TestingFacilityName.label("testing_facility"),
                 *equipment_entities,
             )
             .filter(and_(*filters))
-            .group_by(EIDMaster.ResultTestingFacilityName)
-            .order_by(EIDMaster.ResultTestingFacilityName)
+            .group_by(EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName)
         )
         data = query.all()
         return [
@@ -396,13 +390,13 @@ def samples_by_equipment_by_month_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
+    group_cols, order_cols = _year_month_group_order(EIDMaster.AnalysisDateTime)
     equipment_entities = [
         EQUIPMENT_COUNT(EIDMaster, eq).label(eq) for eq in _EQUIPMENT_TYPES
     ]
@@ -438,35 +432,35 @@ def sample_routes_service(req_args):
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
     group_fields = [
-        EIDMaster.ResultRequestingFacilityName,
-        EIDMaster.ResultTestingFacilityName,
-        EIDMaster.RequestingLatitude,
-        EIDMaster.RequestingLongitude,
-        EIDMaster.TestingLatitude,
-        EIDMaster.TestingLongitude,
+        EIDMaster.RequestingFacilityName,
+        EIDMaster.TestingFacilityName,
+        EIDMaster.RequestingFacilityLatitude,
+        EIDMaster.RequestingFacilityLongitude,
+        EIDMaster.TestingFacilityLatitude,
+        EIDMaster.TestingFacilityLongitude,
     ]
 
     try:
         query = (
             EIDMaster.query.with_entities(
-                EIDMaster.ResultRequestingFacilityName.label("requesting_facility"),
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                EIDMaster.RequestingLatitude.label("requesting_latitude"),
-                EIDMaster.RequestingLongitude.label("requesting_longitude"),
-                EIDMaster.TestingLatitude.label("testing_latitude"),
-                EIDMaster.TestingLongitude.label("testing_longitude"),
+                EIDMaster.RequestingFacilityName.label("requesting_facility"),
+                EIDMaster.TestingFacilityName.label("testing_facility"),
+                EIDMaster.RequestingFacilityLatitude.label("requesting_latitude"),
+                EIDMaster.RequestingFacilityLongitude.label("requesting_longitude"),
+                EIDMaster.TestingFacilityLatitude.label("testing_latitude"),
+                EIDMaster.TestingFacilityLongitude.label("testing_longitude"),
                 TOTAL_ALL,
             )
             .filter(and_(*filters))
             .group_by(*group_fields)
-            .order_by(EIDMaster.ResultRequestingFacilityName)
+            .order_by(EIDMaster.RequestingFacilityName)
         )
         data = query.all()
         return [
@@ -495,8 +489,8 @@ def sample_routes_viewport_service(req_args):
     viewport = req_args.get("viewport")
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -508,37 +502,37 @@ def sample_routes_viewport_service(req_args):
             if len(parts) == 4:
                 south, west, north, east = parts
                 filters.append(
-                    func.cast(EIDMaster.RequestingLatitude, db_float()).between(south, north)
+                    func.cast(EIDMaster.RequestingFacilityLatitude, db_float()).between(south, north)
                 )
                 filters.append(
-                    func.cast(EIDMaster.RequestingLongitude, db_float()).between(west, east)
+                    func.cast(EIDMaster.RequestingFacilityLongitude, db_float()).between(west, east)
                 )
         except (ValueError, TypeError):
             pass
 
     group_fields = [
-        EIDMaster.ResultRequestingFacilityName,
-        EIDMaster.ResultTestingFacilityName,
-        EIDMaster.RequestingLatitude,
-        EIDMaster.RequestingLongitude,
-        EIDMaster.TestingLatitude,
-        EIDMaster.TestingLongitude,
+        EIDMaster.RequestingFacilityName,
+        EIDMaster.TestingFacilityName,
+        EIDMaster.RequestingFacilityLatitude,
+        EIDMaster.RequestingFacilityLongitude,
+        EIDMaster.TestingFacilityLatitude,
+        EIDMaster.TestingFacilityLongitude,
     ]
 
     try:
         query = (
             EIDMaster.query.with_entities(
-                EIDMaster.ResultRequestingFacilityName.label("requesting_facility"),
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                EIDMaster.RequestingLatitude.label("requesting_latitude"),
-                EIDMaster.RequestingLongitude.label("requesting_longitude"),
-                EIDMaster.TestingLatitude.label("testing_latitude"),
-                EIDMaster.TestingLongitude.label("testing_longitude"),
+                EIDMaster.RequestingFacilityName.label("requesting_facility"),
+                EIDMaster.TestingFacilityName.label("testing_facility"),
+                EIDMaster.RequestingFacilityLatitude.label("requesting_latitude"),
+                EIDMaster.RequestingFacilityLongitude.label("requesting_longitude"),
+                EIDMaster.TestingFacilityLatitude.label("testing_latitude"),
+                EIDMaster.TestingFacilityLongitude.label("testing_longitude"),
                 TOTAL_ALL,
             )
             .filter(and_(*filters))
             .group_by(*group_fields)
-            .order_by(EIDMaster.ResultRequestingFacilityName)
+            .order_by(EIDMaster.RequestingFacilityName)
         )
         data = query.all()
         return [
