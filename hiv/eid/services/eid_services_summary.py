@@ -12,6 +12,9 @@ fixes only (docs/superpowers/specs/2026-10-26-eid-dashboard-migration-design.md
 - ✱5: every date window includes its end day.
 - ✱6: conventional/PoC follow the lab-type rule, not RequestID digits.
 - ✱7: every result count reads FinalResult.
+- ✱8: equipment groups add the analyzer codes the legacy missed (C680A ->
+  C6800, M200C -> M2000, PNTHC -> PANTHER, ALNTB -> ALINITY), compared
+  trimmed; equipment counts are expected to be higher than the legacy.
 
 The legacy dashboard routes had no location filter and no null-province
 exclusion; the location and ``lab_code`` filters apply only when given.

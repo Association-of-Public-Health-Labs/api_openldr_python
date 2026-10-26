@@ -41,7 +41,6 @@ class EidSummaryIndicators(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
@@ -76,7 +75,6 @@ class EidSummaryTat(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
@@ -109,7 +107,6 @@ class EidSummaryTatSamples(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabCodeParameter'
             - $ref: '#/parameters/TATCategoryParameter'
         responses:
@@ -132,7 +129,9 @@ class EidSummaryPositivity(Resource):
 
         Legacy dash/samples_positivity. By analysis month (AnalysisDateTime
         window), HL7ResultStatusCode 'F'; tested = every such row.
-        conventional_positive / poc_positive split by the lab-type rule.
+        conventional_positive / poc_positive split by the lab-type rule; their sum can be less than
+        positive, because rows with no analyzer code are in neither lab type
+        (ruling R8).
         ✱3 positivity = positive / tested (percent, 1 decimal; 0 when nothing
         was tested), not conventional / total. ✱5 the end day is included.
         ✱7 results read FinalResult.
@@ -145,7 +144,6 @@ class EidSummaryPositivity(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
@@ -179,7 +177,6 @@ class EidSummaryNumberOfSamples(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
@@ -214,7 +211,6 @@ class EidSummaryIndicatorsByProvince(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
@@ -246,7 +242,6 @@ class EidSummarySamplesPositivity(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabTypeParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
@@ -280,7 +275,6 @@ class EidSummaryRejectedSamplesByMonth(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
@@ -302,7 +296,9 @@ class EidSummarySamplesByEquipment(Resource):
 
         Legacy dash/samples_by_equipment. AnalysisDateTime window,
         HL7ResultStatusCode 'F', IsPoc 'No', no PBC exclusion. ✱5 the end day
-        is included.
+        is included. ✱8 analyzer groups add the codes the legacy missed
+        (C680A to C6800, M200C to M2000, PNTHC to PANTHER, ALNTB to ALINITY),
+        compared trimmed, so counts are expected to be higher than the legacy.
         ---
         tags:
             - HIV EID/Summary
@@ -312,7 +308,6 @@ class EidSummarySamplesByEquipment(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
@@ -334,8 +329,10 @@ class EidSummarySamplesByEquipmentByMonth(Resource):
 
         Legacy dash/samples_by_equipment_monthly. By analysis month
         (AnalysisDateTime window), HL7ResultStatusCode 'F', IsPoc 'No', no PBC
-        exclusion. Analyzer codes compared trimmed. ✱5 the end day is
-        included.
+        exclusion. ✱5 the end day is included.
+        ✱8 analyzer groups add the codes the legacy missed
+        (C680A to C6800, M200C to M2000, PNTHC to PANTHER, ALNTB to ALINITY),
+        compared trimmed, so counts are expected to be higher than the legacy.
         ---
         tags:
             - HIV EID/Summary
@@ -345,7 +342,6 @@ class EidSummarySamplesByEquipmentByMonth(Resource):
             - $ref: '#/parameters/DistrictParameter'
             - $ref: '#/parameters/HealthFacilityParameter'
             - $ref: '#/parameters/FacilityType'
-            - $ref: '#/parameters/DisaggregationParameter'
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
