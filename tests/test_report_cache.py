@@ -80,6 +80,13 @@ class TestCacheKey:
     def test_tb_reports_are_cached_too(self):
         assert report_cache.cache_key("/tb/gx/facilities/tested_samples/", self.args(), TODAY) is not None
 
+    def test_eid_default_window_is_cacheable(self):
+        key = report_cache.cache_key("/hiv/eid/summary/indicators/", self.args(lab_type=["poc"]), TODAY)
+        assert key == {"path": "/hiv/eid/summary/indicators/", "window": YEAR, "params": {"lab_type": ["poc"]}}
+
+    def test_eid_lab_filter_stays_live(self):
+        assert report_cache.cache_key("/hiv/eid/summary/indicators/", self.args(lab_code=["PCD"]), TODAY) is None
+
     @pytest.mark.parametrize("name", ["province", "district", "health_facility", "lab_code"])
     def test_user_filters_stay_live(self, name):
         assert report_cache.cache_key(URL, self.args(**{name: ["Gaza"]}), TODAY) is None
@@ -217,3 +224,55 @@ class TestWarmUp:
             for name, value in report_cache.query_for(key, TODAY):
                 args.setdefault(name, []).append(value)
             assert report_cache.cache_key(key["path"], args, TODAY) == key
+
+
+def test_eid_seed_keys_are_cacheable():
+    from tools.report_cache_seeds import EID_SEEDS, seed_keys
+
+    assert EID_SEEDS
+    keys = seed_keys()
+    for path, window, params in EID_SEEDS:
+        assert path.startswith("/hiv/eid/") and "/patients/" not in path
+        # No category (API default 0); lab_type only as the fixed lab-type cards send it.
+        assert "category" not in params
+        assert params.get("lab_type", ["conventional"]) in (["conventional"], ["poc"])
+        args = {name: list(values) for name, values in params.items()}
+        args["interval_dates"] = [report_cache.window_param(window, TODAY)]
+        key = report_cache.cache_key(path, args, TODAY)
+        assert key is not None, path
+        assert key in keys, path
+
+
+def test_eid_seeds_cover_every_card_default():
+    from tools.report_cache_seeds import EID_SEEDS
+
+    paths = {path for path, _, _ in EID_SEEDS}
+    assert len(paths) == 28
+    assert len(EID_SEEDS) == 32
+    facility = [params for path, _, params in EID_SEEDS if "/facilities/" in path]
+    assert facility and all(p == {"facility_type": ["province"], "disaggregation": ["false"]} for p in facility)
+
+
+def test_eid_fixed_lab_type_cards_are_seeded():
+    from tools.report_cache_seeds import EID_SEEDS
+
+    seeds = {(path, json.dumps(params, sort_keys=True)) for path, _, params in EID_SEEDS}
+    for path, params in [
+        ("/hiv/eid/summary/indicators/", {"lab_type": ["conventional"]}),
+        ("/hiv/eid/summary/indicators/", {"lab_type": ["poc"]}),
+        ("/hiv/eid/laboratories/tested_samples/", {"lab_type": ["conventional"]}),
+        ("/hiv/eid/laboratories/tested_samples/", {"lab_type": ["poc"], "facility_type": ["province"]}),
+    ]:
+        assert (path, json.dumps(params, sort_keys=True)) in seeds
+
+
+def test_eid_seed_paths_are_routes(app):
+    from tools.report_cache_seeds import EID_SEEDS
+
+    routes = {rule.rule for rule in app.url_map.iter_rules()}
+    assert {path for path, _, _ in EID_SEEDS} <= routes
+
+
+def test_viewport_requests_are_never_cached():
+    args = {"interval_dates": ["2025-10-21,2026-10-21"], "viewport": ["-26,32,-10,41"]}
+    assert report_cache.cache_key("/hiv/eid/laboratories/sample_routes_viewport/", args, TODAY) is None

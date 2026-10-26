@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 logger = logging.getLogger(__name__)
 
 # Report endpoints whose default views are cached.
-CACHED_PREFIXES = ("/hiv/vl/", "/tb/gx/")
+CACHED_PREFIXES = ("/hiv/vl/", "/tb/gx/", "/hiv/eid/")
 
 # Filters a user picks (places, labs): their requests stay live, which keeps the cache small.
 USER_FILTERS = ("province", "district", "health_facility", "lab_code")
@@ -132,6 +132,8 @@ def cache_key(path, args, today=None):
     if not path.startswith(CACHED_PREFIXES) or "/patients/" in path:
         return None
     args = {k: list(v) for k, v in args.items()}
+    if args.get("viewport"):  # map pans: every viewport would be a new file
+        return None
     if any(args.get(name) for name in USER_FILTERS):
         return None
     if any(str(v).lower() == "health_facility" for v in args.get("facility_type", [])):

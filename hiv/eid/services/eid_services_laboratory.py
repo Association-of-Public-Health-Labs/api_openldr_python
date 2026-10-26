@@ -1,29 +1,477 @@
-from utilities.utils import (
-    PROCESS_COMMON_PARAMS_VL,
-    YEAR, MONTH, DATE_PART, TOTAL_ALL,
-    POSITIVITY, LAB_TYPE_EID, EQUIPMENT_COUNT, DATE_DIFF_AVG,
-    and_, or_, func, case, text,
-)
+"""
+HIV EID laboratory (Laboratório) services.
+
+Each card function reproduces the legacy openldr-api LaboratoryController
+route named in its docstring (src/modules/eid/controllers/
+LaboratoryController.ts): same date column, same exclusions. The counting
+rules come from hiv/eid/services/eid_common.py. Differences from the legacy
+are the spec's ✱ fixes only (docs/superpowers/specs/
+2026-10-26-eid-dashboard-migration-design.md §4.4):
+
+- ✱2: the rejection routes apply the lab filter (the legacy card sent the
+  wrong parameter, so it was ignored).
+- ✱4/✱7: every result count reads FinalResult (the legacy read PCR_Result,
+  also for PoC).
+- ✱5: every date window includes its end day.
+- ✱8: equipment groups add the analyzer codes the legacy missed (C680A ->
+  C6800, M200C -> M2000, PNTHC -> PANTHER, ALNTB -> ALINITY), compared
+  trimmed; equipment counts are expected to be higher than the legacy.
+
+``lab_code`` filters ``TestingFacilityCode`` (the legacy filtered the lab
+name), except on the routes that group by the receiving lab (registered and
+rejected), where it filters ``ReceivingFacilityCode``. The legacy lab routes
+had no location filter and no null-province exclusion; the location filters
+apply only when given.
+"""
+from sqlalchemy import and_, case, func, literal_column, or_, text
+
 from hiv.eid.models.eid_master_model import EIDMaster
+from hiv.eid.services.eid_common import (
+    EQUIPMENT_GROUPS,
+    REJECTION_REASONS,
+    TAT_SEGMENTS,
+    conventional_condition,
+    date_between_inclusive,
+    equipment_counts,
+    equipment_filters,
+    group_column,
+    location_filters,
+    parse_eid_params,
+    poc_condition,
+    rejected_condition,
+    rejection_reason_counts,
+    result_count,
+    tat_averages,
+    tat_bracket_counts,
+    tat_filters,
+)
+from utilities.utils import LAB_TYPE_EID, PROCESS_COMMON_PARAMS_VL, TOTAL_ALL
+
+_REJECTION_KEYS = [key for key, _ in REJECTION_REASONS] + ["other"]
+_EQUIPMENT_KEYS = [key for key, _ in EQUIPMENT_GROUPS]
+_TAT_KEYS = [key for key, _, _ in TAT_SEGMENTS]
+_BRACKET_KEYS = ["lt_7", "between_7_15", "between_16_21", "gt_21", "no_dates"]
+
+# Drill levels of the by-level lab routes, from the column group_column picks.
+_LEVEL_BY_COLUMN = {
+    "TestingFacilityName": "lab",
+    "RequestingProvinceName": "province",
+    "RequestingDistrictName": "district",
+    "RequestingFacilityName": "health_facility",
+}
+# The legacy lab TAT drill also grouped by (and returned) every level above.
+_TAT_PARENT_COLUMNS = {
+    "lab": [],
+    "province": [],
+    "district": [("province", EIDMaster.RequestingProvinceName)],
+    "health_facility": [
+        ("province", EIDMaster.RequestingProvinceName),
+        ("district", EIDMaster.RequestingDistrictName),
+    ],
+}
 
 
+def _error(e):
+    return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
+
+
+def _count(condition, label):
+    return func.count(case((condition, 1), else_=None)).label(label)
+
+
+def _total(label):
+    return func.count(literal_column("1")).label(label)
+
+
+def _month_columns(column):
+    return [
+        func.year(column).label("year"),
+        func.month(column).label("month"),
+        func.datename(text("month"), column).label("month_name"),
+    ]
+
+
+def _monthly(query, month_cols):
+    return query.group_by(*month_cols).order_by(month_cols[0], month_cols[1]).all()
+
+
+def _month_keys(row):
+    return dict(year=row.year, month=row.month, month_name=row.month_name)
+
+
+def _base_filters(params, date_column, lab_code_column=EIDMaster.TestingFacilityCode):
+    """Inclusive window (✱5), optional location filter and ``lab_code``."""
+    filters = [date_between_inclusive(date_column, params.dates)]
+    filters += location_filters(params, exclude_null_province=False)
+    if params.lab_codes:
+        filters.append(lab_code_column.in_(params.lab_codes))
+    return filters
+
+
+def _not_rejected():
+    """Legacy lab routes: ``LIMSRejectionCode`` NULL or ''."""
+    return or_(EIDMaster.LIMSRejectionCode.is_(None), EIDMaster.LIMSRejectionCode == "")
+
+
+def _is_poc_condition(lab_type):
+    """``IsPoc`` alone, as the legacy lab/all routes split on ``labType``."""
+    if lab_type == "conventional":
+        return EIDMaster.IsPoc == "No"
+    if lab_type == "poc":
+        return EIDMaster.IsPoc == "Yes"
+    return None
+
+
+def _lab_level(params):
+    """(group column, level name) of a by-level lab route."""
+    column = group_column(params, "lab")
+    return column, _LEVEL_BY_COLUMN[column.key]
+
+
+def _group_key(level):
+    return "testing_facility" if level == "lab" else "requesting_facility"
+
+
+# ---------------------------------------------------------------------------
+# 1. laboratories/tested_samples_by_month/   (lab/all/samples_tested_by_month)
+# ---------------------------------------------------------------------------
+def tested_samples_by_month_service(req_args):
+    """Monthly tested ``total``, ``positive`` and ``negative``, by analysis month.
+
+    Legacy: AnalysisDateTime window and month, not rejected
+    (``LIMSRejectionCode`` NULL or ''); ``lab_type`` splits on ``IsPoc``
+    alone, as the lab/all route did. ✱4/✱7 results read FinalResult.
+    """
+    params = parse_eid_params(req_args)
+    month_cols = _month_columns(EIDMaster.AnalysisDateTime)
+    filters = _base_filters(params, EIDMaster.AnalysisDateTime)
+    filters.append(_not_rejected())
+    lab_type = _is_poc_condition(params.lab_type)
+    if lab_type is not None:
+        filters.append(lab_type)
+    try:
+        query = EIDMaster.query.with_entities(
+            *month_cols,
+            _total("total"),
+            result_count("positive", "positive"),
+            result_count("negative", "negative"),
+        ).filter(and_(*filters))
+        return [
+            dict(**_month_keys(row), total=row.total, positive=row.positive,
+                 negative=row.negative)
+            for row in _monthly(query, month_cols)
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 2. laboratories/registered_samples_by_month/   (lab/all/samples_registered_by_month)
+# ---------------------------------------------------------------------------
+def registered_samples_by_month_service(req_args):
+    """Monthly registered ``total``, ``conventional`` and ``poc``, by registration month.
+
+    Legacy: RegisteredDateTime window and month; conventional / poc and
+    ``lab_type`` split on ``IsPoc`` alone. ``lab_code`` filters the receiving
+    lab (``ReceivingFacilityCode``), as the legacy filtered its name.
+    """
+    params = parse_eid_params(req_args)
+    month_cols = _month_columns(EIDMaster.RegisteredDateTime)
+    filters = _base_filters(
+        params, EIDMaster.RegisteredDateTime, lab_code_column=EIDMaster.ReceivingFacilityCode
+    )
+    lab_type = _is_poc_condition(params.lab_type)
+    if lab_type is not None:
+        filters.append(lab_type)
+    try:
+        query = EIDMaster.query.with_entities(
+            *month_cols,
+            _total("total"),
+            _count(EIDMaster.IsPoc == "No", "conventional"),
+            _count(EIDMaster.IsPoc == "Yes", "poc"),
+        ).filter(and_(*filters))
+        return [
+            dict(**_month_keys(row), total=row.total, conventional=row.conventional,
+                 poc=row.poc)
+            for row in _monthly(query, month_cols)
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 3. laboratories/tested_samples/   (lab/conventional/samples_tested + lab/poc/samples_tested)
+# ---------------------------------------------------------------------------
+def _tested_lab_type(lab_type):
+    """The lab-type rows of the legacy conventional / PoC samples_tested routes.
+
+    Conventional: the conventional rule and ``TestingFacilityCode <> 'PBC'``
+    (which drops a NULL code too). PoC: the PoC rule and a testing lab code.
+    ``all`` (no legacy route) is either of the two.
+    """
+    conventional = and_(conventional_condition(), EIDMaster.TestingFacilityCode != "PBC")
+    poc = and_(poc_condition(), EIDMaster.TestingFacilityCode.is_not(None))
+    if lab_type == "conventional":
+        return conventional
+    if lab_type == "poc":
+        return poc
+    return or_(conventional, poc)
+
+
+def tested_samples_service(req_args):
+    """Tested ``total``, ``positive`` and ``negative`` per drill level.
+
+    Legacy: AnalysisDateTime window, not rejected, a testing lab name, and
+    the lab-type rows of ``_tested_lab_type``. The level follows
+    ``facility_type`` (lab by default, province, district, health_facility)
+    and ``disaggregation`` drills one level down (lab -> province ->
+    district -> health_facility). The legacy drill (facilityType = the
+    clicked level, facilityCodes = its name) maps to ``facility_type`` = the
+    clicked level, its name in ``lab_code`` / ``province`` / ``district``,
+    and ``disaggregation=true``. Rows carry ``testing_facility`` at the lab
+    level, ``requesting_facility`` at the other levels. ✱4/✱7 results read
+    FinalResult.
+    """
+    params = parse_eid_params(req_args)
+    column, level = _lab_level(params)
+    filters = _base_filters(params, EIDMaster.AnalysisDateTime)
+    filters += [
+        _not_rejected(),
+        EIDMaster.TestingFacilityName.is_not(None),
+        _tested_lab_type(params.lab_type),
+    ]
+    key = _group_key(level)
+    try:
+        rows = (
+            EIDMaster.query.with_entities(
+                column.label(key),
+                _total("total"),
+                result_count("positive", "positive"),
+                result_count("negative", "negative"),
+            )
+            .filter(and_(*filters))
+            .group_by(column)
+            .order_by(column)
+            .all()
+        )
+        return [
+            {key: getattr(row, key), "total": row.total, "positive": row.positive,
+             "negative": row.negative}
+            for row in rows
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 4. laboratories/tat/   (lab/conventional/tat)
+# ---------------------------------------------------------------------------
+def tat_service(req_args):
+    """Average days of the six TAT segments per drill level (conventional).
+
+    Legacy: AnalysisDateTime window, ``tat_filters("lab_tat")`` (not
+    rejected, conventional, no PBC / PEM, 0-90 days hub registration -> lab
+    reception, ...), integer averages with 0 counted as 1. Levels as
+    ``laboratories/tested_samples/``; as in the legacy, the district level
+    also groups by (and returns) ``province``, and the health facility level
+    ``province`` and ``district``. ``lab_type`` does not apply (conventional
+    only).
+    """
+    params = parse_eid_params(req_args)
+    column, level = _lab_level(params)
+    key = _group_key(level)
+    parents = _TAT_PARENT_COLUMNS[level]
+    group_cols = [col for _, col in parents] + [column]
+    filters = _base_filters(params, EIDMaster.AnalysisDateTime) + tat_filters("lab_tat")
+    try:
+        rows = (
+            EIDMaster.query.with_entities(
+                *[col.label(name) for name, col in parents],
+                column.label(key),
+                *tat_averages(zero_as_one=True),
+            )
+            .filter(and_(*filters))
+            .group_by(*group_cols)
+            .order_by(*group_cols)
+            .all()
+        )
+        names = [name for name, _ in parents] + [key] + _TAT_KEYS
+        return [{name: getattr(row, name) for name in names} for row in rows]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 5. laboratories/tat_samples/   (lab/tat_samples)
+# ---------------------------------------------------------------------------
+def tat_samples_service(req_args):
+    """Day brackets of TAT segment ``category`` (0-5), per testing lab.
+
+    Legacy: AnalysisDateTime window, ``tat_filters("lab_tat_samples")``
+    (IsPoc 'No', no PBC / UEM, no 90-day limit); brackets <7, 7-15, 16-21,
+    >21 and no dates.
+    """
+    params = parse_eid_params(req_args)
+    filters = _base_filters(params, EIDMaster.AnalysisDateTime) + tat_filters("lab_tat_samples")
+    segment = TAT_SEGMENTS[params.category][0]
+    try:
+        rows = (
+            EIDMaster.query.with_entities(
+                EIDMaster.TestingFacilityName.label("testing_facility"),
+                *tat_bracket_counts(params.category),
+            )
+            .filter(and_(*filters))
+            .group_by(EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName)
+            .all()
+        )
+        return [
+            dict(testing_facility=row.testing_facility, category=segment,
+                 **{key: getattr(row, key) for key in _BRACKET_KEYS})
+            for row in rows
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 6. laboratories/rejected_samples/   (lab/rejected_samples)
+# ---------------------------------------------------------------------------
+def _rejected_filters(params):
+    filters = _base_filters(
+        params, EIDMaster.RegisteredDateTime, lab_code_column=EIDMaster.ReceivingFacilityCode
+    )
+    return filters + [rejected_condition(), EIDMaster.IsPoc == "No"]
+
+
+def rejected_samples_service(req_args):
+    """Rejected samples by reason (9 buckets) and ``total``, per receiving lab.
+
+    Legacy: RegisteredDateTime window, ``IsPoc = 'No'``, grouped by
+    ReceivingFacilityName; reasons of the default variant (REJOL and PRTLA
+    count as ``other``). ``total`` counts every rejected row (code or
+    description); a row rejected by description only is in no reason.
+    ✱2 ``lab_code`` applies, on ``ReceivingFacilityCode``.
+    """
+    params = parse_eid_params(req_args)
+    try:
+        rows = (
+            EIDMaster.query.with_entities(
+                EIDMaster.ReceivingFacilityName.label("receiving_facility"),
+                *rejection_reason_counts("default"),
+                _total("total"),
+            )
+            .filter(and_(*_rejected_filters(params)))
+            .group_by(EIDMaster.ReceivingFacilityName)
+            .order_by(EIDMaster.ReceivingFacilityName)
+            .all()
+        )
+        return [
+            dict(receiving_facility=row.receiving_facility,
+                 **{key: getattr(row, key) for key in _REJECTION_KEYS}, total=row.total)
+            for row in rows
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 7. laboratories/rejected_samples_by_month/   (lab/rejected_samples_monthly)
+# ---------------------------------------------------------------------------
+def rejected_samples_by_month_service(req_args):
+    """Monthly rejected samples by reason (9 buckets) and ``total``.
+
+    Legacy: RegisteredDateTime window and month, ``IsPoc = 'No'``; as
+    ``laboratories/rejected_samples/``. ✱2 ``lab_code`` applies, on
+    ``ReceivingFacilityCode``.
+    """
+    params = parse_eid_params(req_args)
+    month_cols = _month_columns(EIDMaster.RegisteredDateTime)
+    try:
+        query = EIDMaster.query.with_entities(
+            *month_cols, *rejection_reason_counts("default"), _total("total")
+        ).filter(and_(*_rejected_filters(params)))
+        return [
+            dict(**_month_keys(row), **{key: getattr(row, key) for key in _REJECTION_KEYS},
+                 total=row.total)
+            for row in _monthly(query, month_cols)
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 8. laboratories/samples_by_equipment/   (lab/samples_by_equipment)
+# ---------------------------------------------------------------------------
+def samples_by_equipment_service(req_args):
+    """Tested samples per analyzer group, per testing lab.
+
+    Legacy: AnalysisDateTime window, ``HL7ResultStatusCode = 'F'``,
+    ``IsPoc = 'No'``, ``TestingFacilityCode <> 'PBC'``, grouped by
+    TestingFacilityName.
+    """
+    params = parse_eid_params(req_args)
+    filters = _base_filters(params, EIDMaster.AnalysisDateTime)
+    filters += equipment_filters(exclude_pbc=True)
+    try:
+        rows = (
+            EIDMaster.query.with_entities(
+                EIDMaster.TestingFacilityName.label("testing_facility"), *equipment_counts()
+            )
+            .filter(and_(*filters))
+            .group_by(EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName)
+            .all()
+        )
+        return [
+            dict(testing_facility=row.testing_facility, tested=row.tested,
+                 **{key: getattr(row, key) for key in _EQUIPMENT_KEYS})
+            for row in rows
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# 9. laboratories/samples_by_equipment_by_month/   (lab/samples_by_equipment_monthly)
+# ---------------------------------------------------------------------------
+def samples_by_equipment_by_month_service(req_args):
+    """Monthly tested samples per analyzer group, by analysis month.
+
+    Legacy: AnalysisDateTime window and month, ``HL7ResultStatusCode = 'F'``,
+    ``IsPoc = 'No'``, no PBC exclusion.
+    """
+    params = parse_eid_params(req_args)
+    month_cols = _month_columns(EIDMaster.AnalysisDateTime)
+    filters = _base_filters(params, EIDMaster.AnalysisDateTime)
+    filters += equipment_filters(exclude_pbc=False)
+    try:
+        query = EIDMaster.query.with_entities(*month_cols, *equipment_counts()).filter(
+            and_(*filters)
+        )
+        return [
+            dict(**_month_keys(row), tested=row.tested,
+                 **{key: getattr(row, key) for key in _EQUIPMENT_KEYS})
+            for row in _monthly(query, month_cols)
+        ]
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
+# Routes no card uses (spec §4.3): only renamed to the rebuilt columns.
+# ---------------------------------------------------------------------------
 def _build_facility_filters(facilities, facility_type):
     """Build facility filter conditions based on facility_type."""
     if not facilities:
         return []
     if facility_type == "province":
-        return [EIDMaster.ResultRequestingProvinceName.in_(facilities)]
+        return [EIDMaster.RequestingProvinceName.in_(facilities)]
     elif facility_type == "district":
-        return [EIDMaster.ResultRequestingDistrictName.in_(facilities)]
+        return [EIDMaster.RequestingDistrictName.in_(facilities)]
     elif facility_type == "health_facility":
-        return [EIDMaster.ResultRequestingFacilityName.in_(facilities)]
+        return [EIDMaster.RequestingFacilityName.in_(facilities)]
     return []
-
-
-def _year_month_group_order(date_field):
-    """Return (group_by, order_by) tuples for year/month grouping."""
-    cols = [YEAR(date_field), MONTH(date_field), DATE_PART("month", date_field)]
-    return cols, cols
 
 
 def _apply_lab_type_filter(filters, lab_type):
@@ -33,440 +481,45 @@ def _apply_lab_type_filter(filters, lab_type):
         filters.append(lab_filter)
 
 
-def _positivity_entities():
-    """Standard positivity with_entities columns for EID."""
-    return [
-        POSITIVITY(EIDMaster.PCR_Result, "Positive").label("positive"),
-        POSITIVITY(EIDMaster.PCR_Result, "Negative").label("negative"),
-    ]
-
-
-def _gender_entities():
-    """Gender count columns for EID."""
-    return [
-        func.count(case((EIDMaster.HL7SexCode == "F", 1))).label("female"),
-        func.count(case((EIDMaster.HL7SexCode == "M", 1))).label("male"),
-    ]
-
-
-# ---------------------------------------------------------------------------
-# 1. tested_samples_by_month_service
-# ---------------------------------------------------------------------------
-def tested_samples_by_month_service(req_args):
-    """Tested samples grouped by year/month with positivity and gender splits."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-
-    filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    _apply_lab_type_filter(filters, lab_type)
-
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                *group_cols,
-                TOTAL_ALL,
-                *_positivity_entities(),
-                *_gender_entities(),
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
-        return [
-            dict(
-                year=row.year, month=row[1], month_name=row[2],
-                total=row.total, positive=row.positive, negative=row.negative,
-                female=row.female, male=row.male,
-            )
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# 2. registered_samples_by_month_service
-# ---------------------------------------------------------------------------
-def registered_samples_by_month_service(req_args):
-    """Registered samples grouped by year/month."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-
-    filters = [EIDMaster.ResultRegisteredDateTime.between(dates[0], dates[1])]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    _apply_lab_type_filter(filters, lab_type)
-
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultRegisteredDateTime)
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                *group_cols,
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
-        return [
-            dict(year=row.year, month=row[1], month_name=row[2], total=row.total)
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# 3. tested_samples_service
-# ---------------------------------------------------------------------------
-def tested_samples_service(req_args):
-    """Tested samples grouped by ResultTestingFacilityName."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-
-    filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    _apply_lab_type_filter(filters, lab_type)
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                TOTAL_ALL,
-                *_positivity_entities(),
-            )
-            .filter(and_(*filters))
-            .group_by(EIDMaster.ResultTestingFacilityName)
-            .order_by(EIDMaster.ResultTestingFacilityName)
-        )
-        data = query.all()
-        return [
-            dict(
-                testing_facility=row.testing_facility,
-                total=row.total, positive=row.positive, negative=row.negative,
-            )
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# 4. tat_service
-# ---------------------------------------------------------------------------
-def tat_service(req_args):
-    """TAT with 6 hub-chain segments grouped by ResultTestingFacilityName."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-
-    filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    _apply_lab_type_filter(filters, lab_type)
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                DATE_DIFF_AVG([EIDMaster.ResultSpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime]).label("collection_receiveHub"),
-                DATE_DIFF_AVG([EIDMaster.LIMSPreReg_ReceivedDateTime, EIDMaster.LIMSPreReg_RegistrationDateTime]).label("receiveHub_registrationHub"),
-                DATE_DIFF_AVG([EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ResultReceivedDatetime]).label("registrationHub_receiveLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultReceivedDatetime, EIDMaster.ResultRegisteredDateTime]).label("receiveLab_registrationLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultRegisteredDateTime, EIDMaster.ResultAnalysisDateTime]).label("registrationLab_analyseLab"),
-                DATE_DIFF_AVG([EIDMaster.ResultAnalysisDateTime, EIDMaster.ResultAuthorisedDateTime]).label("analyseLab_validationLab"),
-            )
-            .filter(and_(*filters))
-            .group_by(EIDMaster.ResultTestingFacilityName)
-            .order_by(EIDMaster.ResultTestingFacilityName)
-        )
-        data = query.all()
-        return [
-            dict(
-                testing_facility=row.testing_facility,
-                collection_receiveHub=row.collection_receiveHub,
-                receiveHub_registrationHub=row.receiveHub_registrationHub,
-                registrationHub_receiveLab=row.registrationHub_receiveLab,
-                receiveLab_registrationLab=row.receiveLab_registrationLab,
-                registrationLab_analyseLab=row.registrationLab_analyseLab,
-                analyseLab_validationLab=row.analyseLab_validationLab,
-            )
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# 5. tat_samples_service
-# ---------------------------------------------------------------------------
-_TAT_CATEGORIES = {
-    1: ("collection_receiveHub", EIDMaster.ResultSpecimenDatetime, EIDMaster.LIMSPreReg_ReceivedDateTime),
-    2: ("receiveHub_registrationHub", EIDMaster.LIMSPreReg_ReceivedDateTime, EIDMaster.LIMSPreReg_RegistrationDateTime),
-    3: ("registrationHub_receiveLab", EIDMaster.LIMSPreReg_RegistrationDateTime, EIDMaster.ResultReceivedDatetime),
-    4: ("receiveLab_registrationLab", EIDMaster.ResultReceivedDatetime, EIDMaster.ResultRegisteredDateTime),
-    5: ("registrationLab_analyseLab", EIDMaster.ResultRegisteredDateTime, EIDMaster.ResultAnalysisDateTime),
-    6: ("analyseLab_validationLab", EIDMaster.ResultAnalysisDateTime, EIDMaster.ResultAuthorisedDateTime),
-}
-
-
-def tat_samples_service(req_args):
-    """TAT distribution: count samples in time brackets for a specific TAT category."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-    category = req_args.get("category") or 1
-
-    if category not in _TAT_CATEGORIES:
-        category = 1
-
-    cat_name, field_start, field_end = _TAT_CATEGORIES[category]
-    diff_expr = func.datediff(text("day"), field_start, field_end)
-
-    filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    _apply_lab_type_filter(filters, lab_type)
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                func.count(case((diff_expr < 7, 1))).label("less_7"),
-                func.count(case((and_(diff_expr >= 7, diff_expr <= 14), 1))).label("between_7_14"),
-                func.count(case((and_(diff_expr >= 15, diff_expr <= 21), 1))).label("between_15_21"),
-                func.count(case((diff_expr > 21, 1))).label("greater_21"),
-            )
-            .filter(and_(*filters))
-        )
-        data = query.all()
-        return [
-            dict(
-                category=cat_name,
-                less_7=row.less_7,
-                between_7_14=row.between_7_14,
-                between_15_21=row.between_15_21,
-                greater_21=row.greater_21,
-            )
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# 6. rejected_samples_service
-# ---------------------------------------------------------------------------
-def rejected_samples_service(req_args):
-    """Rejected samples grouped by ResultTestingFacilityName."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-
-    filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        or_(
-            and_(EIDMaster.ResultLIMSRejectionCode.is_not(None), EIDMaster.ResultLIMSRejectionCode != ""),
-            and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
-        ),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    
-    _apply_lab_type_filter(filters, lab_type)
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(EIDMaster.ResultTestingFacilityName)
-            .order_by(EIDMaster.ResultTestingFacilityName)
-        )
-        data = query.all()
-        return [
-            dict(testing_facility=row.testing_facility, total=row.total)
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# 7. rejected_samples_by_month_service
-# ---------------------------------------------------------------------------
-def rejected_samples_by_month_service(req_args):
-    """Rejected samples grouped by year/month."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-
-    filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        or_(
-            and_(EIDMaster.ResultLIMSRejectionCode.is_not(None), EIDMaster.ResultLIMSRejectionCode != ""),
-            and_(EIDMaster.LIMSRejectionCode.is_not(None), EIDMaster.LIMSRejectionCode != ""),
-        ),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    _apply_lab_type_filter(filters, lab_type)
-
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                *group_cols,
-                TOTAL_ALL,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
-        return [
-            dict(year=row.year, month=row[1], month_name=row[2], total=row.total)
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# 8. samples_by_equipment_service
-# ---------------------------------------------------------------------------
-_EQUIPMENT_TYPES = ["CAPCTM", "ALINITY", "M2000", "C6800", "PANTHER", "MPIMA", "MANUAL"]
-
-
-def samples_by_equipment_service(req_args):
-    """Equipment counts grouped by ResultTestingFacilityName."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-
-    filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    _apply_lab_type_filter(filters, lab_type)
-
-    equipment_entities = [
-        EQUIPMENT_COUNT(EIDMaster, eq).label(eq) for eq in _EQUIPMENT_TYPES
-    ]
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                *equipment_entities,
-            )
-            .filter(and_(*filters))
-            .group_by(EIDMaster.ResultTestingFacilityName)
-            .order_by(EIDMaster.ResultTestingFacilityName)
-        )
-        data = query.all()
-        return [
-            dict(
-                testing_facility=row.testing_facility,
-                **{eq: getattr(row, eq) for eq in _EQUIPMENT_TYPES},
-            )
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# 9. samples_by_equipment_by_month_service
-# ---------------------------------------------------------------------------
-def samples_by_equipment_by_month_service(req_args):
-    """Equipment counts grouped by year/month."""
-    dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
-    lab_type = req_args.get("lab_type") or "all"
-
-    filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
-    ]
-    filters.extend(_build_facility_filters(facilities, facility_type))
-    _apply_lab_type_filter(filters, lab_type)
-
-    group_cols, order_cols = _year_month_group_order(EIDMaster.ResultAnalysisDateTime)
-    equipment_entities = [
-        EQUIPMENT_COUNT(EIDMaster, eq).label(eq) for eq in _EQUIPMENT_TYPES
-    ]
-
-    try:
-        query = (
-            EIDMaster.query.with_entities(
-                *group_cols,
-                *equipment_entities,
-            )
-            .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*order_cols)
-        )
-        data = query.all()
-        return [
-            dict(
-                year=row.year, month=row[1], month_name=row[2],
-                **{eq: getattr(row, eq) for eq in _EQUIPMENT_TYPES},
-            )
-            for row in data
-        ]
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An Error Occurred", "error": str(e)}
-
-
 # ---------------------------------------------------------------------------
 # 10. sample_routes_service
 # ---------------------------------------------------------------------------
 def sample_routes_service(req_args):
     """Requesting/testing facility pairs with coordinates."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
 
     group_fields = [
-        EIDMaster.ResultRequestingFacilityName,
-        EIDMaster.ResultTestingFacilityName,
-        EIDMaster.RequestingLatitude,
-        EIDMaster.RequestingLongitude,
-        EIDMaster.TestingLatitude,
-        EIDMaster.TestingLongitude,
+        EIDMaster.RequestingFacilityName,
+        EIDMaster.TestingFacilityName,
+        EIDMaster.RequestingFacilityLatitude,
+        EIDMaster.RequestingFacilityLongitude,
+        EIDMaster.TestingFacilityLatitude,
+        EIDMaster.TestingFacilityLongitude,
     ]
 
     try:
         query = (
             EIDMaster.query.with_entities(
-                EIDMaster.ResultRequestingFacilityName.label("requesting_facility"),
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                EIDMaster.RequestingLatitude.label("requesting_latitude"),
-                EIDMaster.RequestingLongitude.label("requesting_longitude"),
-                EIDMaster.TestingLatitude.label("testing_latitude"),
-                EIDMaster.TestingLongitude.label("testing_longitude"),
+                EIDMaster.RequestingFacilityName.label("requesting_facility"),
+                EIDMaster.TestingFacilityName.label("testing_facility"),
+                EIDMaster.RequestingFacilityLatitude.label("requesting_latitude"),
+                EIDMaster.RequestingFacilityLongitude.label("requesting_longitude"),
+                EIDMaster.TestingFacilityLatitude.label("testing_latitude"),
+                EIDMaster.TestingFacilityLongitude.label("testing_longitude"),
                 TOTAL_ALL,
             )
             .filter(and_(*filters))
             .group_by(*group_fields)
-            .order_by(EIDMaster.ResultRequestingFacilityName)
+            .order_by(EIDMaster.RequestingFacilityName)
         )
         data = query.all()
         return [
@@ -490,13 +543,14 @@ def sample_routes_service(req_args):
 # ---------------------------------------------------------------------------
 def sample_routes_viewport_service(req_args):
     """Sample routes filtered by viewport bounding box."""
+    parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
     viewport = req_args.get("viewport")
 
     filters = [
-        EIDMaster.ResultAnalysisDateTime.between(dates[0], dates[1]),
-        EIDMaster.ResultAnalysisDateTime.is_not(None),
+        EIDMaster.AnalysisDateTime.between(dates[0], dates[1]),
+        EIDMaster.AnalysisDateTime.is_not(None),
     ]
     filters.extend(_build_facility_filters(facilities, facility_type))
     _apply_lab_type_filter(filters, lab_type)
@@ -508,37 +562,37 @@ def sample_routes_viewport_service(req_args):
             if len(parts) == 4:
                 south, west, north, east = parts
                 filters.append(
-                    func.cast(EIDMaster.RequestingLatitude, db_float()).between(south, north)
+                    func.cast(EIDMaster.RequestingFacilityLatitude, db_float()).between(south, north)
                 )
                 filters.append(
-                    func.cast(EIDMaster.RequestingLongitude, db_float()).between(west, east)
+                    func.cast(EIDMaster.RequestingFacilityLongitude, db_float()).between(west, east)
                 )
         except (ValueError, TypeError):
             pass
 
     group_fields = [
-        EIDMaster.ResultRequestingFacilityName,
-        EIDMaster.ResultTestingFacilityName,
-        EIDMaster.RequestingLatitude,
-        EIDMaster.RequestingLongitude,
-        EIDMaster.TestingLatitude,
-        EIDMaster.TestingLongitude,
+        EIDMaster.RequestingFacilityName,
+        EIDMaster.TestingFacilityName,
+        EIDMaster.RequestingFacilityLatitude,
+        EIDMaster.RequestingFacilityLongitude,
+        EIDMaster.TestingFacilityLatitude,
+        EIDMaster.TestingFacilityLongitude,
     ]
 
     try:
         query = (
             EIDMaster.query.with_entities(
-                EIDMaster.ResultRequestingFacilityName.label("requesting_facility"),
-                EIDMaster.ResultTestingFacilityName.label("testing_facility"),
-                EIDMaster.RequestingLatitude.label("requesting_latitude"),
-                EIDMaster.RequestingLongitude.label("requesting_longitude"),
-                EIDMaster.TestingLatitude.label("testing_latitude"),
-                EIDMaster.TestingLongitude.label("testing_longitude"),
+                EIDMaster.RequestingFacilityName.label("requesting_facility"),
+                EIDMaster.TestingFacilityName.label("testing_facility"),
+                EIDMaster.RequestingFacilityLatitude.label("requesting_latitude"),
+                EIDMaster.RequestingFacilityLongitude.label("requesting_longitude"),
+                EIDMaster.TestingFacilityLatitude.label("testing_latitude"),
+                EIDMaster.TestingFacilityLongitude.label("testing_longitude"),
                 TOTAL_ALL,
             )
             .filter(and_(*filters))
             .group_by(*group_fields)
-            .order_by(EIDMaster.ResultRequestingFacilityName)
+            .order_by(EIDMaster.RequestingFacilityName)
         )
         data = query.all()
         return [

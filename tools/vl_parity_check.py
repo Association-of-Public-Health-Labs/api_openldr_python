@@ -157,26 +157,28 @@ def index_rows(rows, key_fields, value_fields, aggregate=False):
     return index
 
 
-def _same(a, b):
+def same_value(a, b):
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         return abs(a - b) <= FLOAT_TOLERANCE
     return a == b
 
 
-def compare(node_index, python_index, field_pairs):
+def compare(node_index, python_index, field_pairs, labels=("node", "python")):
+    """Differences as text lines; ``labels`` names the two APIs (the EID check says "legacy")."""
+    old, new = labels
     differences = []
     for key in sorted(set(node_index) | set(python_index), key=repr):
         if key not in python_index:
-            differences.append(f"{key} missing in python")
+            differences.append(f"{key} missing in {new}")
             continue
         if key not in node_index:
-            differences.append(f"{key} missing in node")
+            differences.append(f"{key} missing in {old}")
             continue
         for node_field, python_field in field_pairs:
             node_value = node_index[key].get(node_field)
             python_value = python_index[key].get(python_field)
-            if not _same(node_value, python_value):
-                differences.append(f"{key} {node_field}: node={node_value} python={python_value}")
+            if not same_value(node_value, python_value):
+                differences.append(f"{key} {node_field}: {old}={node_value} {new}={python_value}")
     return differences
 
 
@@ -202,7 +204,7 @@ def http_fetch(base, path, params, headers):
     return response.json()
 
 
-def _read_token(path):
+def read_token(path):
     with open(path, encoding="utf-8-sig") as handle:
         return handle.read().strip()
 
@@ -215,7 +217,7 @@ def main(argv=None, fetch=http_fetch):
     parser.add_argument("--year", type=int, default=date.today().year - 1, help="Closed year to compare")
     args = parser.parse_args(argv)
 
-    headers = {"Authorization": f"Bearer {_read_token(args.token_file)}"}
+    headers = {"Authorization": f"Bearer {read_token(args.token_file)}"}
     unexpected = 0
     for label, window in default_windows(args.year).items():
         print(f"\n== {label}: {window[0]} .. {window[1]} ==")

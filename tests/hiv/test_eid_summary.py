@@ -1,448 +1,81 @@
 """
 Tests for EID Summary/Dashboard endpoints (10 routes).
 Each test mocks the corresponding service function at the controller layer
-and verifies a 200 response with expected data structure.
+and verifies a 200 response with the spec §4.3 response keys.
 """
 import pytest
 from unittest.mock import patch
 
+from tests.hiv.sql_capture import captured_queries
 
-# ---------------------------------------------------------------------------
-# Endpoint definitions: (url, service_function_name, mock_response)
-# ---------------------------------------------------------------------------
+MONTH = {"year": 2024, "month": 1, "month_name": "January"}
+TAT_KEYS = [
+    "collection_hub_reception", "hub_reception_hub_registration",
+    "hub_registration_lab_reception", "lab_reception_lab_registration",
+    "lab_registration_analysis", "analysis_validation",
+]
+BRACKET_KEYS = ["lt_7", "between_7_15", "between_16_21", "gt_21", "no_dates"]
+REJECTION_KEYS = [
+    "repeat_test", "insufficient_sample", "request_without_sample", "technical_problems",
+    "overlapping_blood", "duplicate_registration", "misidentified_sample",
+    "sample_over_30_days", "other", "total",
+]
+EQUIPMENT_KEYS = ["tested", "CAPCTM", "ALINITY", "M2000", "C6800", "PANTHER", "MPIMA", "MANUAL"]
+
+
+def _row(keys, base=None):
+    return {**(base or {}), **{key: 1 for key in keys}}
+
+
+# (url, service_function_name, mock_response)
 EID_SUMMARY_ENDPOINTS = [
-    (
-        "/hiv/eid/summary/indicators/",
-        "summary_indicators_service",
-        {
-            "registered": 10000,
-            "tested": 8500,
-            "rejected": 300,
-            "pending": 1200,
-            "positive": 850,
-            "negative": 7650,
-        },
-    ),
-    (
-        "/hiv/eid/summary/tat/",
-        "summary_tat_service",
-        [
-            {
-                "year": 2024,
-                "month": 1,
-                "month_name": "January",
-                "collection_receiveHub": 1.5,
-                "receiveHub_registrationHub": 0.5,
-                "registrationHub_receiveLab": 2.0,
-                "receiveLab_registrationLab": 0.3,
-                "registrationLab_analyseLab": 1.0,
-                "analyseLab_validationLab": 0.2,
-            }
-        ],
-    ),
-    (
-        "/hiv/eid/summary/tat_samples/",
-        "summary_tat_samples_service",
-        [
-            {
-                "category": "collection_receiveHub",
-                "less_7": 500,
-                "between_7_14": 200,
-                "between_15_21": 80,
-                "greater_21": 20,
-            }
-        ],
-    ),
-    (
-        "/hiv/eid/summary/positivity/",
-        "summary_positivity_service",
-        [
-            {
-                "year": 2024,
-                "month": 1,
-                "month_name": "January",
-                "total": 900,
-                "positive": 90,
-                "negative": 810,
-            }
-        ],
-    ),
-    (
-        "/hiv/eid/summary/number_of_samples/",
-        "summary_number_of_samples_service",
-        [{"year": 2024, "month": 1, "month_name": "January", "total": 1000}],
-    ),
-    (
-        "/hiv/eid/summary/indicators_by_province/",
-        "summary_indicators_by_province_service",
-        [
-            {
-                "province": "Maputo",
-                "total": 2000,
-                "tested": 1700,
-                "positive": 170,
-                "conventional": 1500,
-                "poc": 200,
-            }
-        ],
-    ),
-    (
-        "/hiv/eid/summary/samples_positivity/",
-        "summary_samples_positivity_service",
-        {
-            "total": 8500,
-            "positive": 850,
-            "negative": 7650,
-            "female_positive": 420,
-            "male_positive": 430,
-            "female_negative": 3800,
-            "male_negative": 3850,
-        },
-    ),
-    (
-        "/hiv/eid/summary/rejected_samples_by_month/",
-        "summary_rejected_samples_by_month_service",
-        [{"year": 2024, "month": 1, "month_name": "January", "total": 30}],
-    ),
-    (
-        "/hiv/eid/summary/samples_by_equipment/",
-        "summary_samples_by_equipment_service",
-        [
-            {
-                "CAPCTM": 3000,
-                "ALINITY": 1500,
-                "M2000": 1200,
-                "C6800": 800,
-                "PANTHER": 600,
-                "MPIMA": 400,
-                "MANUAL": 1000,
-            }
-        ],
-    ),
-    (
-        "/hiv/eid/summary/samples_by_equipment_by_month/",
-        "summary_samples_by_equipment_by_month_service",
-        [
-            {
-                "year": 2024,
-                "month": 1,
-                "month_name": "January",
-                "CAPCTM": 250,
-                "ALINITY": 125,
-                "M2000": 100,
-                "C6800": 67,
-                "PANTHER": 50,
-                "MPIMA": 33,
-                "MANUAL": 83,
-            }
-        ],
-    ),
+    ("/hiv/eid/summary/indicators/", "summary_indicators_service",
+     [_row(["registered", "tested", "rejected", "pending"], MONTH)]),
+    ("/hiv/eid/summary/tat/", "summary_tat_service", [_row(TAT_KEYS, MONTH)]),
+    ("/hiv/eid/summary/tat_samples/", "summary_tat_samples_service",
+     [_row(BRACKET_KEYS, {**MONTH, "category": "collection_hub_reception"})]),
+    ("/hiv/eid/summary/positivity/", "summary_positivity_service",
+     [_row(["tested", "positive", "negative", "indeterminate",
+            "conventional_positive", "poc_positive", "positivity"], MONTH)]),
+    ("/hiv/eid/summary/number_of_samples/", "summary_number_of_samples_service",
+     [_row(["total", "conventional", "poc"], MONTH)]),
+    ("/hiv/eid/summary/indicators_by_province/", "summary_indicators_by_province_service",
+     [_row(["registered", "tested", "rejected", "pending", "conventional", "poc",
+            "positive", "positivity"], {"province": "Gaza"})]),
+    ("/hiv/eid/summary/samples_positivity/", "summary_samples_positivity_service",
+     _row(["tested", "positive", "negative", "indeterminate", "female_positive",
+           "male_positive", "female_negative", "male_negative"])),
+    ("/hiv/eid/summary/rejected_samples_by_month/", "summary_rejected_samples_by_month_service",
+     [_row(REJECTION_KEYS, MONTH)]),
+    ("/hiv/eid/summary/samples_by_equipment/", "summary_samples_by_equipment_service",
+     [_row(EQUIPMENT_KEYS, {"testing_facility": "Laboratorio X"})]),
+    ("/hiv/eid/summary/samples_by_equipment_by_month/",
+     "summary_samples_by_equipment_by_month_service", [_row(EQUIPMENT_KEYS, MONTH)]),
 ]
 
 
-class TestEidSummaryEndpoints:
-    """Test all 10 EID summary endpoints return 200 with mocked service."""
-
-    @pytest.mark.parametrize("url,service_name,mock_data", EID_SUMMARY_ENDPOINTS)
-    def test_endpoint_returns_200(self, client, auth_headers, url, service_name, mock_data):
-        """Each endpoint should return 200 when authenticated and service returns data."""
-        with patch(
-            f"hiv.eid.controllers.eid_controller_summary.{service_name}",
-            return_value=mock_data,
-        ):
-            response = client.get(url, headers=auth_headers)
-            assert response.status_code == 200
+@pytest.mark.parametrize("url,service_name,mock_data", EID_SUMMARY_ENDPOINTS)
+def test_endpoint_returns_service_data(client, auth_headers, url, service_name, mock_data):
+    with patch(
+        f"hiv.eid.controllers.eid_controller_summary.{service_name}",
+        return_value=mock_data,
+    ):
+        response = client.get(url, headers=auth_headers)
+    assert response.status_code == 200
+    assert response.get_json() == mock_data
 
 
-class TestEidSummaryIndicatorsResponse:
-    """Test response structure for indicators endpoint."""
-
-    def test_response_is_dict_with_expected_keys(self, client, auth_headers):
-        mock_data = {
-            "registered": 10000,
-            "tested": 8500,
-            "rejected": 300,
-            "pending": 1200,
-            "positive": 850,
-            "negative": 7650,
-        }
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_indicators_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/indicators/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, dict)
-            expected_keys = {"registered", "tested", "rejected", "pending", "positive", "negative"}
-            assert expected_keys == set(data.keys())
+@pytest.mark.parametrize("url,service_name,mock_data", EID_SUMMARY_ENDPOINTS)
+def test_empty_window_returns_empty_list(client, auth_headers, url, service_name, mock_data):
+    """The real service, with no rows in the window: HTTP 200 and []."""
+    if isinstance(mock_data, dict):
+        pytest.skip("single-row route")
+    with captured_queries():
+        response = client.get(url, headers=auth_headers)
+    assert response.status_code == 200
+    assert response.get_json() == []
 
 
-class TestEidSummaryTatResponse:
-    """Test response structure for tat endpoint."""
-
-    def test_response_is_list_with_expected_keys(self, client, auth_headers):
-        mock_data = [
-            {
-                "year": 2024,
-                "month": 1,
-                "month_name": "January",
-                "collection_receiveHub": 1.5,
-                "receiveHub_registrationHub": 0.5,
-                "registrationHub_receiveLab": 2.0,
-                "receiveLab_registrationLab": 0.3,
-                "registrationLab_analyseLab": 1.0,
-                "analyseLab_validationLab": 0.2,
-            }
-        ]
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_tat_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/tat/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, list)
-            assert len(data) > 0
-            row = data[0]
-            expected_keys = {
-                "year", "month", "month_name",
-                "collection_receiveHub", "receiveHub_registrationHub",
-                "registrationHub_receiveLab", "receiveLab_registrationLab",
-                "registrationLab_analyseLab", "analyseLab_validationLab",
-            }
-            assert expected_keys == set(row.keys())
-
-
-class TestEidSummaryTatSamplesResponse:
-    """Test response structure for tat_samples endpoint."""
-
-    def test_response_is_list_with_expected_keys(self, client, auth_headers):
-        mock_data = [
-            {
-                "category": "collection_receiveHub",
-                "less_7": 500,
-                "between_7_14": 200,
-                "between_15_21": 80,
-                "greater_21": 20,
-            }
-        ]
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_tat_samples_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/tat_samples/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, list)
-            assert len(data) > 0
-            row = data[0]
-            expected_keys = {"category", "less_7", "between_7_14", "between_15_21", "greater_21"}
-            assert expected_keys == set(row.keys())
-
-
-class TestEidSummaryPositivityResponse:
-    """Test response structure for positivity endpoint."""
-
-    def test_response_is_list_with_expected_keys(self, client, auth_headers):
-        mock_data = [
-            {
-                "year": 2024,
-                "month": 1,
-                "month_name": "January",
-                "total": 900,
-                "positive": 90,
-                "negative": 810,
-            }
-        ]
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_positivity_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/positivity/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, list)
-            assert len(data) > 0
-            row = data[0]
-            expected_keys = {"year", "month", "month_name", "total", "positive", "negative"}
-            assert expected_keys == set(row.keys())
-
-
-class TestEidSummaryNumberOfSamplesResponse:
-    """Test response structure for number_of_samples endpoint."""
-
-    def test_response_is_list_with_expected_keys(self, client, auth_headers):
-        mock_data = [{"year": 2024, "month": 1, "month_name": "January", "total": 1000}]
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_number_of_samples_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/number_of_samples/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, list)
-            assert len(data) > 0
-            row = data[0]
-            expected_keys = {"year", "month", "month_name", "total"}
-            assert expected_keys == set(row.keys())
-
-
-class TestEidSummaryIndicatorsByProvinceResponse:
-    """Test response structure for indicators_by_province endpoint."""
-
-    def test_response_is_list_with_expected_keys(self, client, auth_headers):
-        mock_data = [
-            {
-                "province": "Maputo",
-                "total": 2000,
-                "tested": 1700,
-                "positive": 170,
-                "conventional": 1500,
-                "poc": 200,
-            }
-        ]
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_indicators_by_province_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/indicators_by_province/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, list)
-            assert len(data) > 0
-            row = data[0]
-            expected_keys = {"province", "total", "tested", "positive", "conventional", "poc"}
-            assert expected_keys == set(row.keys())
-
-
-class TestEidSummarySamplesPositivityResponse:
-    """Test response structure for samples_positivity endpoint."""
-
-    def test_response_is_dict_with_expected_keys(self, client, auth_headers):
-        mock_data = {
-            "total": 8500,
-            "positive": 850,
-            "negative": 7650,
-            "female_positive": 420,
-            "male_positive": 430,
-            "female_negative": 3800,
-            "male_negative": 3850,
-        }
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_samples_positivity_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/samples_positivity/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, dict)
-            expected_keys = {
-                "total", "positive", "negative",
-                "female_positive", "male_positive",
-                "female_negative", "male_negative",
-            }
-            assert expected_keys == set(data.keys())
-
-
-class TestEidSummaryRejectedSamplesByMonthResponse:
-    """Test response structure for rejected_samples_by_month endpoint."""
-
-    def test_response_is_list_with_expected_keys(self, client, auth_headers):
-        mock_data = [{"year": 2024, "month": 1, "month_name": "January", "total": 30}]
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_rejected_samples_by_month_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/rejected_samples_by_month/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, list)
-            assert len(data) > 0
-            row = data[0]
-            expected_keys = {"year", "month", "month_name", "total"}
-            assert expected_keys == set(row.keys())
-
-
-class TestEidSummarySamplesByEquipmentResponse:
-    """Test response structure for samples_by_equipment endpoint."""
-
-    def test_response_is_list_with_expected_keys(self, client, auth_headers):
-        mock_data = [
-            {
-                "CAPCTM": 3000,
-                "ALINITY": 1500,
-                "M2000": 1200,
-                "C6800": 800,
-                "PANTHER": 600,
-                "MPIMA": 400,
-                "MANUAL": 1000,
-            }
-        ]
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_samples_by_equipment_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/samples_by_equipment/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, list)
-            assert len(data) > 0
-            row = data[0]
-            expected_keys = {"CAPCTM", "ALINITY", "M2000", "C6800", "PANTHER", "MPIMA", "MANUAL"}
-            assert expected_keys == set(row.keys())
-
-
-class TestEidSummarySamplesByEquipmentByMonthResponse:
-    """Test response structure for samples_by_equipment_by_month endpoint."""
-
-    def test_response_is_list_with_expected_keys(self, client, auth_headers):
-        mock_data = [
-            {
-                "year": 2024,
-                "month": 1,
-                "month_name": "January",
-                "CAPCTM": 250,
-                "ALINITY": 125,
-                "M2000": 100,
-                "C6800": 67,
-                "PANTHER": 50,
-                "MPIMA": 33,
-                "MANUAL": 83,
-            }
-        ]
-        with patch(
-            "hiv.eid.controllers.eid_controller_summary.summary_samples_by_equipment_by_month_service",
-            return_value=mock_data,
-        ):
-            response = client.get(
-                "/hiv/eid/summary/samples_by_equipment_by_month/",
-                headers=auth_headers,
-            )
-            data = response.get_json()
-            assert isinstance(data, list)
-            assert len(data) > 0
-            row = data[0]
-            expected_keys = {
-                "year", "month", "month_name",
-                "CAPCTM", "ALINITY", "M2000", "C6800", "PANTHER", "MPIMA", "MANUAL",
-            }
-            assert expected_keys == set(row.keys())
+def test_tat_samples_rejects_category_out_of_range(client, auth_headers):
+    response = client.get("/hiv/eid/summary/tat_samples/?category=6", headers=auth_headers)
+    assert response.status_code == 400
