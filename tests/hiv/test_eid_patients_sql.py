@@ -113,8 +113,10 @@ def test_name_search_escapes_like_wildcards(app):
 
 
 # --- drill-down: date_basis and rejected -----------------------------------
-def test_date_basis_defaults_to_registered(app):
-    _, sql = run(app, patients.get_patients_by_facility_service, {"date_basis": "registered"})
+@pytest.mark.parametrize("basis", ["registration", "registered", None])
+def test_date_basis_registration_is_the_default_and_registered_an_alias(app, basis):
+    extra = {"date_basis": basis} if basis else {}
+    _, sql = run(app, patients.get_patients_by_facility_service, extra)
     assert "CAST([EIDMaster].[RegisteredDateTime] AS DATE) >= '2025-01-01'" in sql
     assert "CAST([EIDMaster].[AnalysisDateTime] AS DATE) >=" not in sql
 

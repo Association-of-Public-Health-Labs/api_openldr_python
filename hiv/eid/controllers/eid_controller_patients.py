@@ -73,10 +73,10 @@ class EidPatientsByFacility(Resource):
             - name: date_basis
               in: query
               type: string
-              enum: [registered, analysis]
+              enum: [registration, registered, analysis]
               required: false
-              default: registered
-              description: Date the interval_dates window applies to. registered (default) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
+              default: registration
+              description: Date the interval_dates window applies to. registration (default; registered is an alias) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
             - name: rejected
               in: query
               type: string
@@ -147,10 +147,10 @@ class EidPatientsByName(Resource):
             - name: date_basis
               in: query
               type: string
-              enum: [registered, analysis]
+              enum: [registration, registered, analysis]
               required: false
-              default: registered
-              description: Date the interval_dates window applies to. registered (default) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
+              default: registration
+              description: Date the interval_dates window applies to. registration (default; registered is an alias) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
             - name: rejected
               in: query
               type: string
@@ -218,10 +218,10 @@ class EidPatientsByResultType(Resource):
             - name: date_basis
               in: query
               type: string
-              enum: [registered, analysis]
+              enum: [registration, registered, analysis]
               required: false
-              default: registered
-              description: Date the interval_dates window applies to. registered (default) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
+              default: registration
+              description: Date the interval_dates window applies to. registration (default; registered is an alias) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
             - name: rejected
               in: query
               type: string
