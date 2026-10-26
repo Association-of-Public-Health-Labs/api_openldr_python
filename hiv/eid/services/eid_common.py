@@ -23,6 +23,7 @@ from hiv.vl.services.vl_common import (
 )
 from utilities.service_helpers import InvalidParameter
 
+FACILITY_TYPES = ("province", "district", "health_facility", "lab")
 LAB_TYPES = ("all", "conventional", "poc")
 POC_ANALYZER_CODES = ["MPIMA", "PIMA"]
 
@@ -127,6 +128,8 @@ def parse_eid_params(req_args):
     then groups by province, the laboratory level by testing lab.
     """
     facility_type = req_args.get("facility_type") or None
+    if facility_type not in (None, *FACILITY_TYPES):
+        raise InvalidParameter("facility_type must be one of: province, district, health_facility, lab")
     health_facility = req_args.get("health_facility")
 
     if facility_type in (None, "province"):

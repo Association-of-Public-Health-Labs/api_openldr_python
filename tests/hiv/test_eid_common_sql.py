@@ -454,3 +454,14 @@ def test_group_column_lab(eid, args, expected):
 def test_group_column_rejects_unknown_level(eid):
     with pytest.raises(ValueError):
         eid.group_column(eid.parse_eid_params({}), "other")
+
+
+@pytest.mark.parametrize("facility_type", [None, "", "province", "district", "health_facility", "lab"])
+def test_known_facility_types_are_accepted(eid, facility_type):
+    eid.parse_eid_params({"interval_dates": WINDOW, "facility_type": facility_type})
+
+
+@pytest.mark.parametrize("facility_type", ["bogus", "Province", "clinic", "facility"])
+def test_unknown_facility_type_is_an_invalid_parameter(eid, facility_type):
+    with pytest.raises(InvalidParameter):
+        eid.parse_eid_params({"interval_dates": WINDOW, "facility_type": facility_type})
