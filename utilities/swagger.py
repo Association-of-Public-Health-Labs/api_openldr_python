@@ -375,8 +375,13 @@ swagger_template = {
             "name": "category",
             "in": "query",
             "type": "integer",
-            "enum": [1, 2, 3, 4, 5, 6],
-            "description": "TAT segment: 1=Collection-HubReceive, 2=HubReceive-HubRegister, 3=HubRegister-LabReceive, 4=LabReceive-LabRegister, 5=LabRegister-Analysis, 6=Analysis-Validation",
+            "enum": [0, 1, 2, 3, 4, 5],
+            "default": 0,
+            "description": (
+                "TAT segment (EID): 0=collection_hub_reception, 1=hub_reception_hub_registration, "
+                "2=hub_registration_lab_reception, 3=lab_reception_lab_registration, "
+                "4=lab_registration_analysis, 5=analysis_validation"
+            ),
         },
         "ViewportParameter": {
             "name": "viewport",

@@ -195,7 +195,8 @@ class TestEidLabTypeParameter:
             assert response.status_code == 200
 
 
-@pytest.mark.parametrize("module", ["laboratory", "summary"])
+# summary/tat_samples/ is covered by tests/hiv/test_eid_summary_sql.py.
+@pytest.mark.parametrize("module", ["laboratory"])
 @pytest.mark.parametrize(
     "category, segment",
     [("0", "collection_receiveHub"), ("5", "analyseLab_validationLab")],
