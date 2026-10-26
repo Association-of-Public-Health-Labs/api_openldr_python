@@ -12,7 +12,8 @@ legacy stores it, e.g. its TestingFacilityName / ReceivingFacilityName).
 For every legacy route a dashboard card used (spec Appendix A) the script fetches one closed
 year and its last quarter from both APIs, normalises the keys and compares field by field.
 A difference explained by a documented ✱ (spec §4.4) is printed with its size and marked
-"EXPECTED ✱"; any other difference is "DIFF". Exit code 0 means no DIFF and no ERROR.
+"EXPECTED ✱"; any other difference is "DIFF". Exit code 0 means no DIFF, no ERROR and no EMPTY (both APIs returned no rows: nothing
+was compared; ``--allow-empty`` tolerates it). Every check prints its row count per side.
 
 ✱5 (the Python window includes its end day; the legacy BETWEEN cut it at 00:00) is not a tag:
 the legacy request asks for the end date + 1 day (ruling R21), so both sides cover the same whole
@@ -379,8 +380,12 @@ def _within_window(rows, keys, end):
                     and (row["Year"], row["Month"]) > (last.year, last.month))]
 
 
-def run_check(check, window, fetch, legacy_base, python_base, headers, lab_names=None):
-    """(status, lines): status OK, "EXPECTED ✱" or DIFF; lines = field summaries, then row details."""
+def run_check(check, window, fetch, legacy_base, python_base, headers, lab_names=None, counts=None):
+    """(status, lines): status OK, "EXPECTED ✱", DIFF or EMPTY; lines = field summaries, then row details.
+
+    EMPTY: neither API returned a row, so nothing was compared (a vacuous OK would hide a wrong
+    window, lab or token). ``counts``, when given, receives the row count of each side.
+    """
     start, end = window
     query = legacy_query(start, legacy_end(end), check.python_params, check.legacy_params, lab_names,
                          check.legacy_lab_type_param)
@@ -394,6 +399,10 @@ def run_check(check, window, fetch, legacy_base, python_base, headers, lab_names
     )
     if check.legacy_derive:
         legacy_rows = [check.legacy_derive(row) for row in legacy_rows]
+    if counts is not None:
+        counts.update(legacy=len(legacy_rows), python=len(python_rows))
+    if not legacy_rows and not python_rows:
+        return "EMPTY", ["both APIs returned 0 rows: nothing was compared"]
 
     legacy_index = index_rows(legacy_rows, check.legacy_keys, [f for f, _ in check.fields],
                               aggregate=check.legacy_aggregate)
@@ -429,6 +438,8 @@ def main(argv=None, fetch=http_fetch):
     parser.add_argument("--python", required=True, help="Python API base URL, e.g. https://dev.openldr.org.mz")
     parser.add_argument("--token-file", required=True, help="File holding a Python API bearer token")
     parser.add_argument("--year", type=int, default=date.today().year - 1, help="Closed year to compare")
+    parser.add_argument("--allow-empty", action="store_true",
+                        help="Do not fail a check for which both APIs return no rows (still printed as EMPTY)")
     parser.add_argument("--lab", action="append", metavar="CODE=NAME",
                         help="Also run the lab-filtered checks for this lab (code for Python, name for legacy)")
     args = parser.parse_args(argv)
@@ -443,8 +454,10 @@ def main(argv=None, fetch=http_fetch):
     for label, window in default_windows(args.year).items():
         print(f"\n== {label}: {window[0]} .. {window[1]} (legacy asked to {legacy_end(window[1])}) ==")
         for check in checks:
+            counts = {}
             try:
-                status, lines = run_check(check, window, fetch, args.legacy, args.python, headers, lab_names)
+                status, lines = run_check(check, window, fetch, args.legacy, args.python, headers, lab_names,
+                                          counts)
             except (requests.RequestException, ValueError) as exc:
                 status, lines = "ERROR", [str(exc)]
             params = "&".join(
@@ -452,6 +465,8 @@ def main(argv=None, fetch=http_fetch):
             )
             legacy = " + ".join(LEGACY_PREFIX + path for path in (check.legacy_path, *check.legacy_extra_paths))
             print(f"{status:11} {legacy} -> {check.python_path}{'?' + params if params else ''}")
+            if counts:
+                print(f"            legacy {counts['legacy']} rows, python {counts['python']} rows")
             # Field summaries first (all of them), then the first rows that differ.
             summaries = [line for line in lines if not line.startswith("(")]
             details = [line for line in lines if line.startswith("(")]
@@ -459,7 +474,7 @@ def main(argv=None, fetch=http_fetch):
                 print(f"            {line}")
             if len(details) > 5:
                 print(f"            ... {len(details) - 5} more")
-            if status in ("DIFF", "ERROR"):
+            if status in ("DIFF", "ERROR") or (status == "EMPTY" and not args.allow_empty):
                 unexpected += 1
     for path, reason in SKIPPED.items():
         print(f"SKIPPED     {LEGACY_PREFIX}{path}: {reason}")

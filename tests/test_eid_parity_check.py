@@ -255,7 +255,7 @@ def _positivity_only_fetch(python_positive, python_tested=100):
 
 
 def test_expected_star_difference_does_not_fail(tmp_path, capsys):
-    assert _run_main(tmp_path, _positivity_only_fetch(python_positive=13)) == 0
+    assert _run_main(tmp_path, _positivity_only_fetch(python_positive=13), extra=["--allow-empty"]) == 0
     out = capsys.readouterr().out
     assert "EXPECTED ✱" in out
     assert "secret-token" not in out
@@ -263,7 +263,8 @@ def test_expected_star_difference_does_not_fail(tmp_path, capsys):
 
 
 def test_unexpected_difference_fails(tmp_path, capsys):
-    assert _run_main(tmp_path, _positivity_only_fetch(python_positive=10, python_tested=90)) == 1
+    assert _run_main(tmp_path, _positivity_only_fetch(python_positive=10, python_tested=90),
+                     extra=["--allow-empty"]) == 1
     out = capsys.readouterr().out
     assert "UNEXPECTED tested" in out
     assert "2 check(s) with unexpected differences" in out  # the 12- and the 3-month window
@@ -276,9 +277,9 @@ def test_lab_checks_run_only_with_a_lab(tmp_path, capsys):
         calls.append((base, path, tuple(params)))
         return []
 
-    assert _run_main(tmp_path, fetch) == 0
+    assert _run_main(tmp_path, fetch, extra=["--allow-empty"]) == 0
     assert not any(("labCodes[0]", "Lab X") in params for _, _, params in calls)
-    assert _run_main(tmp_path, fetch, extra=["--lab", "PMB=Lab X"]) == 0
+    assert _run_main(tmp_path, fetch, extra=["--allow-empty", "--lab", "PMB=Lab X"]) == 0
     assert any(("labCodes[0]", "Lab X") in params for _, _, params in calls)
 
 
@@ -464,3 +465,29 @@ def test_every_python_field_read_is_a_column_of_the_service_sql(app):
             if field in _COMPUTED:
                 continue
             assert re.search(rf"AS \[?{re.escape(field)}\]?(\W|$)", text), (check.python_path, field)
+
+
+# --- both sides empty is a failure, not an OK -------------------------------
+def test_both_empty_run_check_is_empty_not_ok():
+    check = _check("/dash/pcr/indicators")
+    counts = {}
+    status, lines = parity.run_check(check, WINDOW, lambda *a: [], "legacy", "python", {}, counts=counts)
+    assert status == "EMPTY"
+    assert counts == {"legacy": 0, "python": 0}
+    assert any("0 row" in line for line in lines)
+
+
+def test_both_empty_everywhere_exits_non_zero_and_prints_counts(tmp_path, capsys):
+    assert _run_main(tmp_path, lambda *a: []) == 1
+    out = capsys.readouterr().out
+    assert "EMPTY" in out
+    assert "legacy 0 rows, python 0 rows" in out
+
+
+def test_row_counts_are_printed_for_ok_checks(tmp_path, capsys):
+    assert _run_main(tmp_path, _positivity_only_fetch(python_positive=13), extra=["--allow-empty"]) == 0
+    assert "legacy 1 rows, python 1 rows" in capsys.readouterr().out
+
+
+def test_allow_empty_does_not_fail_the_run(tmp_path):
+    assert _run_main(tmp_path, lambda *a: [], extra=["--allow-empty"]) == 0
