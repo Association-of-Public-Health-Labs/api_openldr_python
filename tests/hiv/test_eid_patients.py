@@ -113,3 +113,10 @@ def test_admin_probe_over_http(client, auth_headers, app):
         assert client.get(URL + "?lab_type=bogus", headers=auth_headers).status_code == 400
     with patch.object(patients, "_get_user_role", return_value=("u1", "Admin")), patch.object(Query, "all", lambda self: []), patch.object(Query, "count", lambda self: 0):
         assert client.get(URL + "?per_page=1", headers=auth_headers).status_code == 200
+
+
+def test_bad_paging_over_http_checks_role_first(client, auth_headers):
+    with patch.object(patients, "_get_user_role", return_value=("u2", "Viewer")):
+        assert client.get(URL + "?per_page=x", headers=auth_headers).status_code == 403
+    with patch.object(patients, "_get_user_role", return_value=("u1", "Admin")):
+        assert client.get(URL + "?per_page=x", headers=auth_headers).status_code == 400

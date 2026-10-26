@@ -159,7 +159,7 @@ def _search(req_args, params, filters):
     ]
     try:
         query = EIDMaster.query.with_entities(*EID_PATIENT_COLUMNS).filter(*filters)
-        query = query.order_by(EIDMaster.RequestID)
+        query = query.order_by(EIDMaster.RequestID, EIDMaster.OBRSetID, EIDMaster.RegisteredDateTime)
         total_count = query.count()
         rows = query.offset((page - 1) * per_page).limit(per_page).all()
         return {

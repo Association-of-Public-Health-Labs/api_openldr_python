@@ -13,8 +13,8 @@ _parser = build_common_parser(
     extra_args=[
         ("name", STR_ARG),
         ("result_type", LIST_ARG),
-        ("page", {"type": int, "location": "args", "default": 1}),
-        ("per_page", {"type": int, "location": "args", "default": 50}),
+        ("page", STR_ARG),
+        ("per_page", STR_ARG),
         *EID_FILTER_ARGS,
     ]
 )

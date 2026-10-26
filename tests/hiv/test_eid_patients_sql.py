@@ -34,7 +34,7 @@ def test_selects_labelled_columns_ordered_by_request_id(app):
     assert "[EIDMaster].[CaregiverMobileContact] AS caregiver_phone" in select
     assert "[EIDMaster].[PtvMother] AS mother_ptv_id" in select
     assert "[EIDMaster].[FinalResult] AS result" in select
-    assert "ORDER BY [EIDMaster].[RequestID]" in sql
+    assert "ORDER BY [EIDMaster].[RequestID], [EIDMaster].[OBRSetID], [EIDMaster].[RegisteredDateTime]" in sql
 
 
 def test_window_is_registered_date_inclusive(app):
