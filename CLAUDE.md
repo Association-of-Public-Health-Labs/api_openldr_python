@@ -174,6 +174,73 @@ Errors: services return `{"status": "error", "code": N}` and
 `run_reporting_endpoint` sends HTTP N. 5xx bodies never include exception
 text, and `InvalidParameter` gives a 400.
 
+## EID parity with the legacy API
+
+The `hiv/eid/*` endpoints reproduce the numbers of the legacy TypeScript API
+(`openldr-api`, `api-ts.openldr.org.mz`) that the old EID dashboard used, route
+by route (spec `docs/superpowers/specs/2026-10-26-eid-dashboard-migration-design.md`,
+Appendix A maps each card to its legacy route). All counting rules live in
+`hiv/eid/services/eid_common.py` (lab type, results, rejection buckets, TAT
+filters per legacy route family, equipment groups, location filters and
+drill levels). Each service docstring names the legacy route it replaces, and
+each Swagger description states its rule and its ✱.
+
+`tools/eid_parity_check.py` compares both APIs on real data, over one closed
+year and its last quarter (the legacy API is public; the Python one needs a
+token from `POST /auth/login`):
+
+    python -m tools.eid_parity_check --legacy https://api-ts.openldr.org.mz \
+        --python https://dev.openldr.org.mz --token-file token.txt [--year 2025] [--lab PMB="Lab name"]
+
+It translates the parameters (`interval_dates` → `dates[0]`/`dates[1]`,
+`lab_code` → `labCodes[i]` by lab name, `facility_type` → `facilityType`,
+`health_facility` → `clinic`, place names → `facilityCodes[i]`, `lab_type` →
+the legacy route variant) and compares field by field. Each line is `OK`,
+`EXPECTED ✱` (every difference explained by a ✱ below, printed with its size)
+or `DIFF`; exit code 0 means no `DIFF` and no `ERROR`. `--lab CODE=NAME` adds
+the lab-filtered checks.
+
+Deliberate differences from the legacy (✱, spec §4.4):
+
+| ✱ | Endpoints | Legacy | Python |
+|---|---|---|---|
+| 1 | `facilities/key_indicators/` | The province page called the PoC route for both tabs | `lab_type` gives each lab type its own rows |
+| 2 | `laboratories/rejected_samples*` | The card sent `facilities` instead of `labCodes`, so the lab filter was ignored | `lab_code` applies, on `ReceivingFacilityCode` |
+| 3 | `summary/positivity/` | The line plotted conventional ÷ total | `positivity` = positive ÷ tested |
+| 4 | laboratory tested routes | PoC positivity read `PCR_Result` | Covered by ✱7 |
+| 5 | every route | `BETWEEN start AND end` cut the end day at 00:00 | The end day is included |
+| 6 | `summary/indicators/`, `summary/number_of_samples/` | PCR/PoC split by `RequestID` digits | The lab-type rule |
+| 7 | every result, pending and positivity count; patients | `PCR_Result`/`POC_Result` patterns (`'%Pos%'`, `'Pos%'`, `'Positivo'`, `'Detec%'`) | `FinalResult` (values in `RESULT_VALUES`) |
+| 8 | equipment routes | Analyzer lists missed C680A, M200C, PNTHC, ALNTB; codes compared untrimmed | Those codes added, codes compared trimmed: counts rise |
+
+The script tags ✱5 on every check (a count may only grow, an average may move),
+✱7 on every result / pending / positivity field, ✱3 on positivity, ✱6 on the
+summary indicators, ✱8 on the equipment groups and ✱2 on the lab-filtered
+rejected checks. Report the ✱7 shift (positivity, pending) to the users.
+
+Kept on purpose, for parity:
+- Lab type: conventional = `IsPoc = 'No'` and analyzer not MPIMA/PIMA, PoC = `IsPoc = 'Yes'` or MPIMA/PIMA. A NULL analyzer code with `IsPoc = 'No'` is in neither (R8, about 1% of conventional samples); it still counts under `lab_type=all`, so conventional + PoC can be less than the total.
+- Routes whose legacy version split on `IsPoc` alone keep it: `summary/indicators_by_province/` (R17), the monthly laboratory routes and every facility route.
+- Rejection `other` counts only a non-empty code outside the 8 buckets; a row rejected by description only is in the rejected total but in no reason (R10).
+- Facility rejected routes keep the legacy Clinic rule: `AnalysisDateTime` window and `LIMSRejectionCode <> ''` (R20), so Província rejected numbers differ from Sumário/Laboratório rejected, as they did in the legacy.
+- TAT quality filters follow each legacy route family (`tat_filters(variant)`); averages are integer `AVG(DATEDIFF(day, ...))`, 0 counted as 1 on the laboratory and facility TAT routes.
+- `key_indicators` keeps rejected = `HL7ResultStatusCode = 'X'` and pending = no result and status not `'X'`.
+
+EID-specific parameters: `lab_code` (repeatable or CSV; `TestingFacilityCode`,
+or `ReceivingFacilityCode` on the registered and rejected laboratory routes),
+`lab_type` (`all` default, `conventional`, `poc`), `category` (TAT segment
+0–5, default 0 = collection → hub reception). Any other value is a 400.
+Laboratory by-level routes take `facility_type` lab (default) / province /
+district / health_facility and drill one level down with `disaggregation=true`.
+
+Patients (`patients/by_facility/`, `by_name/`, `by_result_type/`): Admin only,
+bound parameters only, `per_page` ≤ 500. They return the caregiver phone and
+the mother's PTV identifiers; these are never written to logs. The dashboard
+probes admin access with `patients/by_facility/?per_page=1`.
+
+The EID dashboard's default requests are cached and warmed like VL's
+(`EID_SEEDS` in `tools/report_cache_seeds.py`).
+
 ## Transport TAT (VL and EID)
 
 `/hiv/{vl,eid}/transport/tat_by_location/` (one row per province / district / health
@@ -194,13 +261,13 @@ weekly spreadsheets' "Tempo de Transporte" sheet (api-weekly-reports-python). Sh
 
 ## Report cache (dashboard defaults)
 
-The VL and TB dashboards open on "last 12 months" reports. `run_reporting_endpoint`
+The VL, TB and EID dashboards open on "last 12 months" reports. `run_reporting_endpoint`
 serves those from a shared file cache (`utilities/report_cache.py`), after the token check:
 
-- Cached: `/hiv/vl/*` and `/tb/gx/*` with a default window, VL's (same day last year → today)
+- Cached: `/hiv/vl/*`, `/tb/gx/*` and `/hiv/eid/*` with a default window, VL's and EID's (same day last year → today)
   or TB Laboratório's (1st of the month 11 months ago → today), ±1 day, and no `province`,
   `district`, `health_facility` or `lab_code`. The key leaves out the dates.
-- Never cached: patient endpoints, `facility_type=health_facility`, other periods, errors.
+- Never cached: patient endpoints, `facility_type=health_facility`, map `viewport` requests, other periods, errors.
 - Responses carry `X-Report-Cache: HIT|MISS` and `X-Report-Computed-At`.
 - `tools/warm_report_cache.py` recomputes the seeds (`tools/report_cache_seeds.py`, the
   dashboards' first-screen requests) and every entry already cached. The container runs it
