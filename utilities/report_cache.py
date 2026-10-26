@@ -132,6 +132,8 @@ def cache_key(path, args, today=None):
     if not path.startswith(CACHED_PREFIXES) or "/patients/" in path:
         return None
     args = {k: list(v) for k, v in args.items()}
+    if args.get("viewport"):  # map pans: every viewport would be a new file
+        return None
     if any(args.get(name) for name in USER_FILTERS):
         return None
     if any(str(v).lower() == "health_facility" for v in args.get("facility_type", [])):

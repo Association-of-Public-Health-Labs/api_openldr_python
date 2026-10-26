@@ -229,13 +229,11 @@ _TAT_CATEGORIES = {
 
 def tat_samples_service(req_args):
     """TAT distribution: count samples in time brackets for a specific TAT category."""
-    parse_eid_params(req_args)
+    params = parse_eid_params(req_args)
     dates, facilities, facility_type, disaggregation, health_facility = PROCESS_COMMON_PARAMS_VL(req_args)
     lab_type = req_args.get("lab_type") or "all"
-    category = parse_eid_params(req_args).category or 1
-
-    if category not in _TAT_CATEGORIES:
-        category = 1
+    # The request's category runs 0-5; the old table is keyed 1-6.
+    category = params.category + 1
 
     cat_name, field_start, field_end = _TAT_CATEGORIES[category]
     diff_expr = func.datediff(text("day"), field_start, field_end)

@@ -224,3 +224,8 @@ class TestWarmUp:
             for name, value in report_cache.query_for(key, TODAY):
                 args.setdefault(name, []).append(value)
             assert report_cache.cache_key(key["path"], args, TODAY) == key
+
+
+def test_viewport_requests_are_never_cached():
+    args = {"interval_dates": ["2025-10-21,2026-10-21"], "viewport": ["-26,32,-10,41"]}
+    assert report_cache.cache_key("/hiv/eid/laboratories/sample_routes_viewport/", args, TODAY) is None

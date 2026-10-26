@@ -193,3 +193,26 @@ class TestEidLabTypeParameter:
                 headers=auth_headers,
             )
             assert response.status_code == 200
+
+
+@pytest.mark.parametrize("module", ["laboratory", "summary"])
+@pytest.mark.parametrize(
+    "category, segment",
+    [("0", "collection_receiveHub"), ("5", "analyseLab_validationLab")],
+)
+def test_tat_samples_category_scale_is_zero_to_five(app, module, category, segment):
+    """category 0 selects the first TAT segment (collection to hub reception), 5 the last."""
+    import importlib
+
+    from unittest.mock import MagicMock
+
+    svc = importlib.import_module(f"hiv.eid.services.eid_services_{module}")
+    name = "tat_samples_service" if module == "laboratory" else "summary_tat_samples_service"
+    row = MagicMock(less_7=1, between_7_14=0, between_15_21=0, greater_21=0)
+    with app.app_context(), patch.object(svc.EIDMaster, "query") as query:
+        query.with_entities.return_value.filter.return_value.all.return_value = [row]
+        result = getattr(svc, name)(
+            {"interval_dates": ["2025-01-01,2025-12-31"], "category": category}
+        )
+    assert isinstance(result, list), result
+    assert result[0]["category"] == segment
