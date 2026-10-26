@@ -15,6 +15,8 @@ _parser = build_common_parser(
         ("result_type", LIST_ARG),
         ("page", STR_ARG),
         ("per_page", STR_ARG),
+        ("date_basis", STR_ARG),
+        ("rejected", STR_ARG),
         *EID_FILTER_ARGS,
     ]
 )
@@ -32,7 +34,7 @@ class EidPatientsByFacility(Resource):
         Admin only (403 otherwise). health_facility is optional, so
         /hiv/eid/patients/by_facility/?per_page=1 is the dashboard's admin
         probe. Patient routes are never cached. The window is on
-        RegisteredDateTime, both days included. Rows carry the caregiver's
+        RegisteredDateTime (date_basis=analysis: AnalysisDateTime), both days included. Rows carry the caregiver's
         phone (CaregiverMobileContact) and the mother's PTV id (PtvMother):
         third-party contact details, never logged. result is FinalResult
         (✱7); lab_type is conventional or poc (null when the row is in
@@ -68,6 +70,19 @@ class EidPatientsByFacility(Resource):
               required: false
               default: 50
               description: Records per page (default 50, maximum 500)
+            - name: date_basis
+              in: query
+              type: string
+              enum: [registered, analysis]
+              required: false
+              default: registered
+              description: Date the interval_dates window applies to. registered (default) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
+            - name: rejected
+              in: query
+              type: string
+              enum: ['true', 'false']
+              required: false
+              description: Only rejected samples, by the facility rejected routes' rule (R20) - IsPoc = 'No' and LIMSRejectionCode non-empty - with the window on AnalysisDateTime whatever date_basis is.
         responses:
             200:
                 description: A page of EID patients.
@@ -88,7 +103,7 @@ class EidPatientsByName(Resource):
 
         Admin only (403 otherwise). name matches the first name and surname
         together (partial, case-insensitive). Patient routes are never
-        cached. The window is on RegisteredDateTime, both days included.
+        cached. The window is on RegisteredDateTime (date_basis=analysis: AnalysisDateTime), both days included.
         Rows carry the caregiver's phone (CaregiverMobileContact) and the
         mother's PTV id (PtvMother): third-party contact details, never
         logged. result is FinalResult (✱7); lab_type is conventional or poc
@@ -129,6 +144,19 @@ class EidPatientsByName(Resource):
               required: false
               default: 50
               description: Records per page (default 50, maximum 500)
+            - name: date_basis
+              in: query
+              type: string
+              enum: [registered, analysis]
+              required: false
+              default: registered
+              description: Date the interval_dates window applies to. registered (default) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
+            - name: rejected
+              in: query
+              type: string
+              enum: ['true', 'false']
+              required: false
+              description: Only rejected samples, by the facility rejected routes' rule (R20) - IsPoc = 'No' and LIMSRejectionCode non-empty - with the window on AnalysisDateTime whatever date_basis is.
         responses:
             200:
                 description: A page of EID patients.
@@ -151,7 +179,7 @@ class EidPatientsByResultType(Resource):
         negative, indeterminate (FinalResult values, ✱7), rejected
         (LIMSRejectionCode or LIMSRejectionDesc non-empty) or pending (not
         rejected, no definitive result). Patient routes are never cached.
-        The window is on RegisteredDateTime, both days included. Rows carry
+        The window is on RegisteredDateTime (date_basis=analysis: AnalysisDateTime), both days included. Rows carry
         the caregiver's phone (CaregiverMobileContact) and the mother's PTV
         id (PtvMother): third-party contact details, never logged.
         lab_type is conventional or poc (null when in neither);
@@ -187,6 +215,19 @@ class EidPatientsByResultType(Resource):
               required: false
               default: 50
               description: Records per page (default 50, maximum 500)
+            - name: date_basis
+              in: query
+              type: string
+              enum: [registered, analysis]
+              required: false
+              default: registered
+              description: Date the interval_dates window applies to. registered (default) = RegisteredDateTime; analysis = AnalysisDateTime (drill-downs from tested cards). Any other value is a 400.
+            - name: rejected
+              in: query
+              type: string
+              enum: ['true', 'false']
+              required: false
+              description: Only rejected samples, by the facility rejected routes' rule (R20) - IsPoc = 'No' and LIMSRejectionCode non-empty - with the window on AnalysisDateTime whatever date_basis is.
         responses:
             200:
                 description: A page of EID patients.

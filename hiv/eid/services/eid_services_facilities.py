@@ -33,6 +33,7 @@ from hiv.eid.services.eid_common import (
     TAT_SEGMENTS,
     date_between_inclusive,
     group_column,
+    legacy_rejected_conditions,
     location_filters,
     parse_eid_params,
     rejection_reason_counts,
@@ -259,7 +260,7 @@ def _rejected_filters(params):
     not counted (legacy). ``lab_type`` does not apply (conventional only).
     """
     filters = _base_filters(params, EIDMaster.AnalysisDateTime, with_lab_type=False)
-    return filters + [EIDMaster.IsPoc == "No", EIDMaster.LIMSRejectionCode != ""]
+    return filters + legacy_rejected_conditions()
 
 
 def facility_rejected_samples_service(req_args):

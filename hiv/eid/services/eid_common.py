@@ -211,6 +211,15 @@ def rejected_condition():
     )
 
 
+def legacy_rejected_conditions():
+    """The rejected-sample rule of the facility routes (legacy, ruling R20).
+
+    ``IsPoc = 'No'`` and ``LIMSRejectionCode <> ''`` (a NULL code is dropped
+    too). The caller windows these rows on ``AnalysisDateTime``.
+    """
+    return [EIDMaster.IsPoc == "No", EIDMaster.LIMSRejectionCode != ""]
+
+
 def pending_condition():
     """Not rejected and no definitive result (✱7); NDT values stay pending."""
     return and_(

@@ -16,9 +16,11 @@ from sqlalchemy import case, func, or_
 from hiv.eid.models.eid_master_model import EIDMaster
 from hiv.eid.services.eid_common import (
     RESULT_VALUES,
+    TRUTHY_VALUES,
     conventional_condition,
     date_between_inclusive,
     lab_type_condition,
+    legacy_rejected_conditions,
     parse_eid_params,
     pending_condition,
     poc_condition,
@@ -35,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 MAX_PER_PAGE = 500
 
+DATE_BASES = ("registered", "analysis")
 RESULT_TYPES = ("positive", "negative", "indeterminate", "rejected", "pending")
 
 
@@ -150,10 +153,30 @@ def _serialise(row):
     return record
 
 
+def _truthy(value):
+    return str(value or "").strip().lower() in TRUTHY_VALUES
+
+
+def _date_filters(req_args, params):
+    """The window (and the rejected rule) matching the card the drill-down comes from.
+
+    ``date_basis`` registered (default) or analysis; anything else is a 400.
+    ``rejected`` applies the facility rejected routes' rule (R20): the window
+    is on AnalysisDateTime whatever the basis.
+    """
+    basis = str(req_args.get("date_basis") or "registered").strip().lower()
+    if basis not in DATE_BASES:
+        raise InvalidParameter("date_basis must be 'registered' or 'analysis'")
+    if _truthy(req_args.get("rejected")):
+        return [date_between_inclusive(EIDMaster.AnalysisDateTime, params.dates), *legacy_rejected_conditions()]
+    column = EIDMaster.AnalysisDateTime if basis == "analysis" else EIDMaster.RegisteredDateTime
+    return [date_between_inclusive(column, params.dates)]
+
+
 def _search(req_args, params, filters):
     page, per_page = _paging(req_args)
     filters = [
-        date_between_inclusive(EIDMaster.RegisteredDateTime, params.dates),
+        *_date_filters(req_args, params),
         *filters,
         *_drill_down_filters(req_args, params),
     ]

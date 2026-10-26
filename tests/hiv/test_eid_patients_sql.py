@@ -7,6 +7,7 @@ from sqlalchemy.dialects import mssql
 from tests.hiv.sql_capture import service_sql
 from hiv.eid.services import eid_services_patients as patients
 from hiv.eid.services.eid_common import RESULT_VALUES
+from utilities.service_helpers import InvalidParameter
 
 ARGS = {"interval_dates": ["2025-01-01,2025-12-31"]}
 
@@ -109,3 +110,36 @@ def test_name_is_a_bound_parameter(app):
 def test_name_search_escapes_like_wildcards(app):
     _, sql = run(app, patients.get_patients_by_name_service, {"name": "50%_x"})
     assert "ESCAPE" in sql and "50/%/_x" in sql
+
+
+# --- drill-down: date_basis and rejected -----------------------------------
+def test_date_basis_defaults_to_registered(app):
+    _, sql = run(app, patients.get_patients_by_facility_service, {"date_basis": "registered"})
+    assert "CAST([EIDMaster].[RegisteredDateTime] AS DATE) >= '2025-01-01'" in sql
+    assert "CAST([EIDMaster].[AnalysisDateTime] AS DATE) >=" not in sql
+
+
+def test_date_basis_analysis_windows_on_analysis_date_inclusive(app):
+    _, sql = run(app, patients.get_patients_by_facility_service, {"date_basis": "analysis"})
+    assert ("CAST([EIDMaster].[AnalysisDateTime] AS DATE) >= '2025-01-01' AND "
+            "CAST([EIDMaster].[AnalysisDateTime] AS DATE) <= '2025-12-31'") in sql
+    assert "CAST([EIDMaster].[RegisteredDateTime] AS DATE) >=" not in sql
+
+
+def test_rejected_flag_uses_the_facility_rejected_rule(app):
+    _, sql = run(app, patients.get_patients_by_facility_service, {"rejected": "true"})
+    assert "CAST([EIDMaster].[AnalysisDateTime] AS DATE) >= '2025-01-01'" in sql
+    assert "CAST([EIDMaster].[RegisteredDateTime] AS DATE) >=" not in sql
+    assert "[EIDMaster].[LIMSRejectionCode] != ''" in sql
+    assert "[EIDMaster].[IsPoc] = 'No'" in sql
+
+
+def test_rejected_flag_off_adds_no_rejection_condition(app):
+    _, sql = run(app, patients.get_patients_by_facility_service, {"rejected": "false"})
+    assert "[EIDMaster].[LIMSRejectionCode] != ''" not in sql
+    assert "CAST([EIDMaster].[RegisteredDateTime] AS DATE) >=" in sql
+
+
+def test_bogus_date_basis_raises_invalid_parameter(app):
+    with pytest.raises(InvalidParameter):
+        service_sql(app, patients.get_patients_by_facility_service, {**ARGS, "date_basis": "bogus"})

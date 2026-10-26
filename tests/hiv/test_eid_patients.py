@@ -120,3 +120,10 @@ def test_bad_paging_over_http_checks_role_first(client, auth_headers):
         assert client.get(URL + "?per_page=x", headers=auth_headers).status_code == 403
     with patch.object(patients, "_get_user_role", return_value=("u1", "Admin")):
         assert client.get(URL + "?per_page=x", headers=auth_headers).status_code == 400
+
+
+def test_bad_date_basis_over_http_is_400_for_admin_403_otherwise(client, auth_headers):
+    with patch.object(patients, "_get_user_role", return_value=("u2", "Viewer")):
+        assert client.get(URL + "?date_basis=bogus", headers=auth_headers).status_code == 403
+    with patch.object(patients, "_get_user_role", return_value=("u1", "Admin")):
+        assert client.get(URL + "?date_basis=bogus", headers=auth_headers).status_code == 400
