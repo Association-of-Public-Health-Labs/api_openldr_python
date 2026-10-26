@@ -140,8 +140,21 @@ def test_unbucketed_code_counts_as_other(eid):
     for code in ("COM", "INLS", "FDR", "AMONR", "HAEM", "15DIA", "NOCD", "OUTR", "SAALC"):
         assert code not in bucketed
     other = to_sql(eid.rejection_reason_counts()[-1])
-    assert "NOT IN ('REPIT', 'SPUN2', 'REJOL', 'INS', 'UNS'" in other
+    assert other.startswith(
+        "count(CASE WHEN ([EIDMaster].[LIMSRejectionCode] IS NOT NULL AND "
+        "ltrim(rtrim([EIDMaster].[LIMSRejectionCode])) != '' AND "
+    )
+    assert "ltrim(rtrim([EIDMaster].[LIMSRejectionCode])) NOT IN ('REPIT', 'SPUN2', 'REJOL', 'INS', 'UNS'" in other
+    assert "AS other" in select_sql(eid.rejection_reason_counts()[-1:])
     assert "'COM'" not in other
+
+
+def test_description_only_rejection_is_not_other(eid):
+    """`other` needs a non-empty code; a desc-only rejection is in no reason column."""
+    other = to_sql(eid.rejection_reason_counts()[-1])
+    assert "LIMSRejectionDesc" not in other
+    assert "[EIDMaster].[LIMSRejectionCode] IS NULL" not in other
+    assert "LIMSRejectionDesc" in sql_of(eid.rejected_condition())
 
 
 # --- TAT ---------------------------------------------------------------------
@@ -227,11 +240,20 @@ def test_equipment_counts_trim_codes(eid):
     assert "ltrim(rtrim([EIDMaster].[LIMSAnalyzerCode])) IN ('MANUA', 'MGIT', 'SYSMX', '')" in s
 
 
-def test_equipment_filters(eid):
+def test_equipment_filters_exclude_pbc_by_default(eid):
     s = sql_of(*eid.equipment_filters())
+    assert s == sql_of(*eid.equipment_filters(exclude_pbc=True))
     assert "[EIDMaster].[HL7ResultStatusCode] = 'F'" in s
     assert "[EIDMaster].[IsPoc] = 'No'" in s
     assert "[EIDMaster].[TestingFacilityCode] != 'PBC'" in s
+    assert "LIMSAnalyzerCode" not in s
+
+
+def test_equipment_filters_without_pbc_exclusion(eid):
+    s = sql_of(*eid.equipment_filters(exclude_pbc=False))
+    assert "[EIDMaster].[HL7ResultStatusCode] = 'F'" in s
+    assert "[EIDMaster].[IsPoc] = 'No'" in s
+    assert "PBC" not in s and "TestingFacilityCode" not in s
 
 
 # --- parameters --------------------------------------------------------------

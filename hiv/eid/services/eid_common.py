@@ -219,19 +219,16 @@ def pending_condition():
 def rejection_reason_counts():
     """The 8 coded buckets plus ``other``.
 
-    ``other`` is every rejected row whose code is in no bucket, including a
-    rejection given only by description, so the 9 counts sum to the rejected
-    total. (The legacy ``NOT IN`` dropped rows with a NULL code.)
+    ``other`` is a non-empty rejection code that is in no bucket (COM, INLS,
+    ...), as in the legacy. A row rejected only by description counts in
+    ``rejected_condition()`` totals but in no reason column.
     """
     code = _trimmed(EIDMaster.LIMSRejectionCode)
     bucketed = [c for _, codes in REJECTION_REASONS for c in codes]
     counts = [count_where(code.in_(codes), key) for key, codes in REJECTION_REASONS]
     counts.append(
         count_where(
-            and_(
-                rejected_condition(),
-                or_(EIDMaster.LIMSRejectionCode.is_(None), code.not_in(bucketed)),
-            ),
+            and_(_non_empty_trimmed(EIDMaster.LIMSRejectionCode), code.not_in(bucketed)),
             "other",
         )
     )
@@ -306,17 +303,30 @@ def equipment_counts():
     ]
 
 
-def equipment_filters():
-    """Final results of non-PoC requests, not from PBC.
+def equipment_filters(exclude_pbc=True):
+    """Final results of non-PoC requests (``HL7ResultStatusCode = 'F'``).
 
     ``IsPoc = 'No'`` as in the legacy (the full conventional rule would empty
-    the MPIMA group by construction).
+    the MPIMA group by construction). The PBC exclusion is route-specific
+    (``TestingFacilityCode <> 'PBC'``, which also drops a NULL code). The
+    legacy openldr-api routes (src/modules/eid/controllers) set it as follows:
+
+    - LaboratoryController.getSamplesByEquipment (per lab,
+      ``laboratories/samples_by_equipment/``): excludes PBC, so pass ``True``.
+    - LaboratoryController.getSamplesByEquipmentMonthly
+      (``laboratories/samples_by_equipment_by_month/``): no exclusion, so pass ``False``.
+    - DashboardController.getSamplesByEquipmentMonthly
+      (``summary/samples_by_equipment_by_month/``): no exclusion, so pass ``False``.
+    - DashboardController.getSamplesByEquipment (per lab, summary): no
+      exclusion, so pass ``False``.
     """
-    return [
+    filters = [
         EIDMaster.HL7ResultStatusCode == "F",
         EIDMaster.IsPoc == "No",
-        EIDMaster.TestingFacilityCode != "PBC",
     ]
+    if exclude_pbc:
+        filters.append(EIDMaster.TestingFacilityCode != "PBC")
+    return filters
 
 
 # ---------------------------------------------------------------------------
