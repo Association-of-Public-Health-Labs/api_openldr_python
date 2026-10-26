@@ -14,9 +14,13 @@ year and its last quarter from both APIs, normalises the keys and compares field
 A difference explained by a documented ✱ (spec §4.4) is printed with its size and marked
 "EXPECTED ✱"; any other difference is "DIFF". Exit code 0 means no DIFF and no ERROR.
 
-    ✱2  the lab rejected cards now apply the lab filter (the legacy card sent the wrong parameter)
+✱5 (the Python window includes its end day; the legacy BETWEEN cut it at 00:00) is not a tag:
+the legacy request asks for the end date + 1 day (ruling R21), so both sides cover the same whole
+days. The legacy side then also counts rows stamped exactly at 00:00:00 of the following day;
+such a residual difference shows as DIFF and must be read by a human (it is small and sits in the
+last month / every per-place row).
+
     ✱3  "Positividade das Amostras" is positive ÷ tested (legacy card: conventional ÷ total)
-    ✱5  the end day of the window is included (legacy: cut at 00:00), so counts can only grow
     ✱6  summary conventional / PoC use the lab-type rule (legacy: RequestID digits)
     ✱7  results and pending read FinalResult (legacy: PCR_Result / POC_Result patterns)
     ✱8  equipment groups add the analyzer codes the legacy lists missed (C680A, M200C, ...)
@@ -24,7 +28,7 @@ A difference explained by a documented ✱ (spec §4.4) is printed with its size
 import argparse
 import sys
 from collections import namedtuple
-from datetime import date
+from datetime import date, timedelta
 
 import requests
 
@@ -55,13 +59,12 @@ legacy_path: relative to /eid. python_params: as the dashboard sends them; the l
 their translation (``legacy_query``), with ``legacy_params`` merged on top (None drops a
 translated parameter). fields: (legacy field, python field) pairs. legacy_aggregate: sum legacy
 rows sharing a key (the legacy grouped finer). stars: {✱: python fields or ALL} beyond the
-automatic ✱5 and ✱7. legacy_derive: adds computed fields to each legacy row.
+automatic ✱7. legacy_derive: adds computed fields to each legacy row.
 """
 
 STARS = {
-    "✱2": "the lab filter now applies to the lab rejected cards",
     "✱3": "positivity = positive ÷ tested (legacy card: conventional ÷ total)",
-    "✱5": "inclusive end day (legacy cut the last day at 00:00)",
+    "✱5": "inclusive end day: not a tag, the legacy is asked for end + 1 day (R21)",
     "✱6": "conventional / PoC by the lab-type rule (legacy: RequestID digits)",
     "✱7": "results and pending from FinalResult (legacy: PCR_Result / POC_Result)",
     "✱8": "equipment groups include the analyzer codes the legacy missed",
@@ -104,8 +107,7 @@ KEY_INDICATORS = [("Registadas", "registered"), ("Testadas", "tested"), ("Rejeit
                   ("Pendentes", "pending"), ("Positividade", "positive")]
 REGISTERED = [("Total", "total"), ("Conventional", "conventional"), ("Poc", "poc")]
 
-# Python fields that are averages or percentages: the inclusive end day (✱5) can move them
-# either way. Every other field is a count, which ✱5 can only increase.
+# Python fields that are averages or percentages: summarised as means, not sums.
 NON_COUNT_FIELDS = set(_TAT_PYTHON) | {"positivity"}
 # ✱7 applies to every field that reads a result.
 RESULT_WORDS = ("positive", "negative", "indeterminate", "pending", "positivity")
@@ -188,14 +190,17 @@ CHECKS = [
 
 
 def lab_checks(lab_code):
-    """Checks filtered by one lab (``--lab CODE=NAME``): the lab rejected cards (✱2) and the
-    monthly tested / registered cards, which filter the testing / receiving lab."""
+    """Checks filtered by one lab (``--lab CODE=NAME``): the lab rejected cards and the monthly
+    tested / registered cards, which filter the receiving / testing lab.
+
+    No ✱2 here (ruling R23): ✱2 was a legacy *card* bug (it sent ``facilities``); the legacy route
+    filters correctly given ``labCodes`` (by lab name), so these must match exactly.
+    """
     lab = {"lab_code": [lab_code]}
     return [
         Check("/lab/rejected_samples", f"{L}/rejected_samples/", lab,
-              ["ReceivingFacilityName"], ["receiving_facility"], REJECTION, stars={"✱2": ALL}),
-        Check("/lab/rejected_samples_monthly", f"{L}/rejected_samples_by_month/", lab, *MONTH, REJECTION,
-              stars={"✱2": ALL}),
+              ["ReceivingFacilityName"], ["receiving_facility"], REJECTION),
+        Check("/lab/rejected_samples_monthly", f"{L}/rejected_samples_by_month/", lab, *MONTH, REJECTION),
         Check("/lab/all/samples_tested_by_month", f"{L}/tested_samples_by_month/", lab, *MONTH,
               [("Total", "total"), ("Positivity", "positive")]),
         Check("/lab/all/samples_registered_by_month", f"{L}/registered_samples_by_month/", lab, *MONTH,
@@ -270,10 +275,6 @@ def _is_number(value):
 def _marks(check, field, legacy_value, python_value):
     """The expected ✱ that explain one field difference (empty: unexpected)."""
     marks = []
-    if field in NON_COUNT_FIELDS or (
-        _is_number(legacy_value) and _is_number(python_value) and python_value >= legacy_value
-    ):
-        marks.append("✱5")
     if any(word in field for word in RESULT_WORDS):
         marks.append("✱7")
     for mark, fields in (check.stars or {}).items():
@@ -319,12 +320,17 @@ def field_summaries(check, legacy_index, python_index):
     return summaries
 
 
+def legacy_end(end):
+    """The legacy end date: ``end`` + 1 day, so its BETWEEN covers the whole end day (R21)."""
+    return (date.fromisoformat(end) + timedelta(days=1)).isoformat()
+
+
 def run_check(check, window, fetch, legacy_base, python_base, headers, lab_names=None):
     """(status, lines): status OK, "EXPECTED ✱" or DIFF; lines = field summaries, then row details."""
     start, end = window
     legacy_rows = _rows(fetch(
         legacy_base, LEGACY_PREFIX + check.legacy_path,
-        legacy_query(start, end, check.python_params, check.legacy_params, lab_names), {},
+        legacy_query(start, legacy_end(end), check.python_params, check.legacy_params, lab_names), {},
     ))
     python_rows = _rows(fetch(python_base, check.python_path, python_query(start, end, check.python_params), headers))
     if check.legacy_derive:
@@ -333,17 +339,14 @@ def run_check(check, window, fetch, legacy_base, python_base, headers, lab_names
     legacy_index = index_rows(legacy_rows, check.legacy_keys, [f for f, _ in check.fields],
                               aggregate=check.legacy_aggregate)
     python_index = index_rows(python_rows, check.python_keys, [f for _, f in check.fields])
+    # A row only one side has is never explained by a ✱.
     missing = compare(legacy_index, python_index, [], labels=LABELS)
-    # A row only in Python can come from the included end day (✱5); a row Python lost cannot.
-    unexpected_rows = [line for line in missing if line.endswith(f"missing in {LABELS[1]}")]
     summaries = field_summaries(check, legacy_index, python_index)
     details = compare(legacy_index, python_index, check.fields, labels=LABELS)
     if not details:
         return "OK", []
-    lines = [line for _, line in summaries] + [
-        f"{line} (✱5)" if line in missing and line not in unexpected_rows else line for line in details
-    ]
-    if unexpected_rows or not all(expected for expected, _ in summaries):
+    lines = [line for _, line in summaries] + details
+    if missing or not all(expected for expected, _ in summaries):
         return "DIFF", lines
     return "EXPECTED ✱", lines
 
@@ -379,7 +382,7 @@ def main(argv=None, fetch=http_fetch):
     headers = {"Authorization": f"Bearer {read_token(args.token_file)}"}
     unexpected = 0
     for label, window in default_windows(args.year).items():
-        print(f"\n== {label}: {window[0]} .. {window[1]} ==")
+        print(f"\n== {label}: {window[0]} .. {window[1]} (legacy asked to {legacy_end(window[1])}) ==")
         for check in checks:
             try:
                 status, lines = run_check(check, window, fetch, args.legacy, args.python, headers, lab_names)

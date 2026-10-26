@@ -84,7 +84,8 @@ TB_SEEDS = [
 
 
 # The EID dashboard sends no lab_type and no category on its default requests (the API defaults:
-# lab_type all, category 0), and facility routes as VL's. Map drills, the province page and patient
+# lab_type all, category 0), and facility routes as VL's. Cards fixed to one lab type send exactly
+# lab_type=conventional / lab_type=poc (ruling R22). Map drills, the province page and patient
 # routes carry a place or are never cached, so they are not seeds.
 _EID = "/hiv/eid"
 _EID_FACILITY = {"facility_type": ["province"], "disaggregation": ["false"]}
@@ -92,6 +93,8 @@ _EID_FACILITY = {"facility_type": ["province"], "disaggregation": ["false"]}
 EID_SEEDS = [
     # Sumário
     (f"{_EID}/summary/indicators/", YEAR, {}),
+    (f"{_EID}/summary/indicators/", YEAR, {"lab_type": ["conventional"]}),  # Principais Indicadores tabs
+    (f"{_EID}/summary/indicators/", YEAR, {"lab_type": ["poc"]}),
     (f"{_EID}/summary/positivity/", YEAR, {}),
     (f"{_EID}/summary/indicators_by_province/", YEAR, {}),
     (f"{_EID}/summary/tat/", YEAR, {}),
@@ -100,6 +103,9 @@ EID_SEEDS = [
     (f"{_EID}/summary/samples_by_equipment_by_month/", YEAR, {}),
     # Laboratório
     (f"{_EID}/laboratories/tested_samples/", YEAR, {}),
+    (f"{_EID}/laboratories/tested_samples/", YEAR, {"lab_type": ["conventional"]}),  # Testadas por lab/Convencional
+    # Testadas por lab/PoC opens per province (ruling R18).
+    (f"{_EID}/laboratories/tested_samples/", YEAR, {"lab_type": ["poc"], "facility_type": ["province"]}),
     (f"{_EID}/laboratories/tested_samples_by_month/", YEAR, {}),
     (f"{_EID}/laboratories/registered_samples_by_month/", YEAR, {}),
     (f"{_EID}/laboratories/tat_samples/", YEAR, {}),

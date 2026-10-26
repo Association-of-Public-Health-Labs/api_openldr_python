@@ -233,8 +233,9 @@ def test_eid_seed_keys_are_cacheable():
     keys = seed_keys()
     for path, window, params in EID_SEEDS:
         assert path.startswith("/hiv/eid/") and "/patients/" not in path
-        # The dashboard's default request: no lab_type, no category (API defaults all / 0).
-        assert "lab_type" not in params and "category" not in params
+        # No category (API default 0); lab_type only as the fixed lab-type cards send it.
+        assert "category" not in params
+        assert params.get("lab_type", ["conventional"]) in (["conventional"], ["poc"])
         args = {name: list(values) for name, values in params.items()}
         args["interval_dates"] = [report_cache.window_param(window, TODAY)]
         key = report_cache.cache_key(path, args, TODAY)
@@ -246,9 +247,23 @@ def test_eid_seeds_cover_every_card_default():
     from tools.report_cache_seeds import EID_SEEDS
 
     paths = {path for path, _, _ in EID_SEEDS}
-    assert len(paths) == len(EID_SEEDS) == 28
+    assert len(paths) == 28
+    assert len(EID_SEEDS) == 32
     facility = [params for path, _, params in EID_SEEDS if "/facilities/" in path]
     assert facility and all(p == {"facility_type": ["province"], "disaggregation": ["false"]} for p in facility)
+
+
+def test_eid_fixed_lab_type_cards_are_seeded():
+    from tools.report_cache_seeds import EID_SEEDS
+
+    seeds = {(path, json.dumps(params, sort_keys=True)) for path, _, params in EID_SEEDS}
+    for path, params in [
+        ("/hiv/eid/summary/indicators/", {"lab_type": ["conventional"]}),
+        ("/hiv/eid/summary/indicators/", {"lab_type": ["poc"]}),
+        ("/hiv/eid/laboratories/tested_samples/", {"lab_type": ["conventional"]}),
+        ("/hiv/eid/laboratories/tested_samples/", {"lab_type": ["poc"], "facility_type": ["province"]}),
+    ]:
+        assert (path, json.dumps(params, sort_keys=True)) in seeds
 
 
 def test_eid_seed_paths_are_routes(app):

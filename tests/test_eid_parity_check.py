@@ -92,7 +92,7 @@ def test_lab_checks_translate_lab_code_to_the_legacy_lab_name():
     check = next(c for c in parity.lab_checks("PMB") if c.legacy_path == "/lab/rejected_samples")
     parity.run_check(check, WINDOW, fetch, "legacy", "python", {}, lab_names={"PMB": "Lab Ref Maputo"})
     assert calls["legacy"] == ("/eid/lab/rejected_samples", [
-        ("dates[0]", "2025-01-01"), ("dates[1]", "2025-12-31"), ("labCodes[0]", "Lab Ref Maputo"),
+        ("dates[0]", "2025-01-01"), ("dates[1]", "2026-01-01"), ("labCodes[0]", "Lab Ref Maputo"),
     ])
     assert calls["python"] == ("/hiv/eid/laboratories/rejected_samples/", [
         ("interval_dates", "2025-01-01,2025-12-31"), ("lab_code", ["PMB"]),
@@ -162,21 +162,50 @@ def test_positivity_shift_is_expected_and_sized():
     assert re.search(r"✱3.* positivity: legacy 10(\.0)? -> python 12(\.0)?", summary)
 
 
-def test_inclusive_end_day_may_only_add_samples():
+def test_legacy_request_asks_for_the_day_after_the_end():
+    """R21: legacy BETWEEN start AND end+1 covers the whole end day, as Python's inclusive window."""
+    sent = {}
+
+    def fetch(base, path, params, headers):
+        sent[base] = params
+        return []
+
+    for check in parity.CHECKS:
+        parity.run_check(check, WINDOW, fetch, "legacy", "python", {})
+        assert sent["legacy"][:2] == [("dates[0]", "2025-01-01"), ("dates[1]", "2026-01-01")], check.legacy_path
+        assert sent["python"][0] == ("interval_dates", "2025-01-01,2025-12-31")
+    assert parity.legacy_end("2024-02-28") == "2024-02-29"
+
+
+@pytest.mark.parametrize("python_total", [12, 8])
+def test_a_count_difference_with_no_star_fails_either_way(python_total):
     check = _check("/lab/all/samples_registered_by_month")
 
-    def rows(total):
-        def fetch(base, path, params, headers):
-            if base == "legacy":
-                return [{"Year": 2025, "Month": 12, "MonthName": "December", "Total": 10, "Conventional": 10, "Poc": 0}]
-            return [{"year": 2025, "month": 12, "month_name": "December", "total": total, "conventional": total,
-                     "poc": 0}]
-        return fetch
+    def fetch(base, path, params, headers):
+        if base == "legacy":
+            return [{"Year": 2025, "Month": 12, "MonthName": "December", "Total": 10, "Conventional": 10, "Poc": 0}]
+        return [{"year": 2025, "month": 12, "month_name": "December", "total": python_total,
+                 "conventional": python_total, "poc": 0}]
 
-    assert parity.run_check(check, WINDOW, rows(12), "legacy", "python", {})[0] == "EXPECTED ✱"
-    status, lines = parity.run_check(check, WINDOW, rows(8), "legacy", "python", {})
+    status, lines = parity.run_check(check, WINDOW, fetch, "legacy", "python", {})
     assert status == "DIFF"
     assert any(line.startswith("UNEXPECTED total") for line in lines)
+
+
+def test_a_row_only_python_has_is_unexpected():
+    check = _check("/lab/all/samples_registered_by_month")
+
+    def fetch(base, path, params, headers):
+        if base == "legacy":
+            return []
+        return [{"year": 2026, "month": 1, "month_name": "January", "total": 1, "conventional": 1, "poc": 0}]
+
+    assert parity.run_check(check, WINDOW, fetch, "legacy", "python", {}) == ("DIFF", ["(2026, 1) missing in legacy"])
+
+
+def test_lab_checks_carry_no_expected_star():
+    """R23: the legacy route filters correctly given labCodes, so lab-filtered checks must match."""
+    assert all(not check.stars for check in parity.lab_checks("PMB"))
 
 
 def test_a_row_missing_in_python_is_unexpected():
@@ -203,7 +232,7 @@ def test_equipment_groups_are_expected_star_8():
 
     status, lines = parity.run_check(check, WINDOW, fetch, "legacy", "python", {})
     assert status == "EXPECTED ✱"
-    assert any(line.startswith("✱5 ✱8 C6800") for line in lines)
+    assert any(line.startswith("✱8 C6800") for line in lines)
 
 
 # --------------------------------------------------------------------------- main

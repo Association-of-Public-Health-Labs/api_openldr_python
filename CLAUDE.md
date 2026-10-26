@@ -198,7 +198,14 @@ It translates the parameters (`interval_dates` → `dates[0]`/`dates[1]`,
 the legacy route variant) and compares field by field. Each line is `OK`,
 `EXPECTED ✱` (every difference explained by a ✱ below, printed with its size)
 or `DIFF`; exit code 0 means no `DIFF` and no `ERROR`. `--lab CODE=NAME` adds
-the lab-filtered checks.
+the lab-filtered checks; give the lab's code for Python and its **name** for
+the legacy, which filters `labCodes` by name. They carry no ✱ (R23: the legacy
+route filters correctly; ✱2 was a card bug), so they must match exactly.
+
+✱5 is not a tag (R21): the script asks the legacy for the end date + 1 day, so
+both sides cover the same whole days. The legacy then also counts rows stamped
+exactly at 00:00:00 of the following day; a residual difference of that kind
+shows as `DIFF` and must be read by a human.
 
 Deliberate differences from the legacy (✱, spec §4.4):
 
@@ -213,10 +220,10 @@ Deliberate differences from the legacy (✱, spec §4.4):
 | 7 | every result, pending and positivity count; patients | `PCR_Result`/`POC_Result` patterns (`'%Pos%'`, `'Pos%'`, `'Positivo'`, `'Detec%'`) | `FinalResult` (values in `RESULT_VALUES`) |
 | 8 | equipment routes | Analyzer lists missed C680A, M200C, PNTHC, ALNTB; codes compared untrimmed | Those codes added, codes compared trimmed: counts rise |
 
-The script tags ✱5 on every check (a count may only grow, an average may move),
-✱7 on every result / pending / positivity field, ✱3 on positivity, ✱6 on the
-summary indicators, ✱8 on the equipment groups and ✱2 on the lab-filtered
-rejected checks. Report the ✱7 shift (positivity, pending) to the users.
+The script tags ✱7 on every result / pending / positivity field, ✱3 on
+positivity, ✱6 on the summary indicators and ✱8 on the equipment groups; any
+other difference, and any row only one side has, is a `DIFF`. Report the ✱7
+shift (positivity, pending) to the users.
 
 Kept on purpose, for parity:
 - Lab type: conventional = `IsPoc = 'No'` and analyzer not MPIMA/PIMA, PoC = `IsPoc = 'Yes'` or MPIMA/PIMA. A NULL analyzer code with `IsPoc = 'No'` is in neither (R8, about 1% of conventional samples); it still counts under `lab_type=all`, so conventional + PoC can be less than the total.
@@ -239,7 +246,10 @@ the mother's PTV identifiers; these are never written to logs. The dashboard
 probes admin access with `patients/by_facility/?per_page=1`.
 
 The EID dashboard's default requests are cached and warmed like VL's
-(`EID_SEEDS` in `tools/report_cache_seeds.py`).
+(`EID_SEEDS` in `tools/report_cache_seeds.py`): no `lab_type` and no
+`category`, except the fixed lab-type cards, which send exactly
+`lab_type=conventional` / `lab_type=poc` (and `lab_type=poc&facility_type=province`
+for the Laboratório PoC card, R18).
 
 ## Transport TAT (VL and EID)
 
