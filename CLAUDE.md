@@ -212,17 +212,22 @@ Deliberate differences from the legacy (✱, spec §4.4):
 | ✱ | Endpoints | Legacy | Python |
 |---|---|---|---|
 | 1 | `facilities/key_indicators/` | The province page called the PoC route for both tabs | `lab_type` gives each lab type its own rows |
-| 2 | `laboratories/rejected_samples*` | The card sent `facilities` instead of `labCodes`, so the lab filter was ignored | `lab_code` applies, on `ReceivingFacilityCode` |
+| 2 | `laboratories/rejected_samples*` | The card sent `facilities` instead of `labCodes`, so the lab filter was ignored | `lab_code` applies, on `ReceivingFacilityCode` (not a script tag: the legacy route filters correctly) |
 | 3 | `summary/positivity/` | The line plotted conventional ÷ total | `positivity` = positive ÷ tested |
 | 4 | laboratory tested routes | PoC positivity read `PCR_Result` | Covered by ✱7 |
-| 5 | every route | `BETWEEN start AND end` cut the end day at 00:00 | The end day is included |
+| 5 | every route | `BETWEEN start AND end` cut the end day at 00:00 | The end day is included (not a script tag: the legacy is asked for end + 1 day) |
 | 6 | `summary/indicators/`, `summary/number_of_samples/` | PCR/PoC split by `RequestID` digits | The lab-type rule |
 | 7 | every result, pending and positivity count; patients | `PCR_Result`/`POC_Result` patterns (`'%Pos%'`, `'Pos%'`, `'Positivo'`, `'Detec%'`) | `FinalResult` (values in `RESULT_VALUES`) |
 | 8 | equipment routes | Analyzer lists missed C680A, M200C, PNTHC, ALNTB; codes compared untrimmed | Those codes added, codes compared trimmed: counts rise |
 
 The script tags ✱7 on every result / pending / positivity field, ✱3 on
 positivity, ✱6 on the summary indicators and ✱8 on the equipment groups; any
-other difference, and any row only one side has, is a `DIFF`. Report the ✱7
+other difference, any row only one side has, and any field missing on either
+side is a `DIFF`. Legacy month rows after the window's end month (from the
+extra day) are dropped; year/month compare as integers. The KPI tiles are
+checked as Python `summary/indicators/` (no `lab_type`) against legacy
+`dash/pcr/indicators` + `dash/poc/indicators` summed per month, and the
+`/lab/all/*` Convencional/PoC selects as `lab_type` → `labType`. Report the ✱7
 shift (positivity, pending) to the users.
 
 Kept on purpose, for parity:

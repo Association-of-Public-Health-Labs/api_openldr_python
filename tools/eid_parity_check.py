@@ -50,8 +50,8 @@ ALL = "all fields"
 Check = namedtuple(
     "Check",
     "legacy_path python_path python_params legacy_keys python_keys fields "
-    "legacy_params legacy_aggregate stars legacy_derive",
-    defaults=(None, False, None, None),
+    "legacy_params legacy_aggregate stars legacy_derive legacy_extra_paths legacy_lab_type_param",
+    defaults=(None, False, None, None, (), None),
 )
 Check.__doc__ = """One legacy route compared with one Python route.
 
@@ -59,7 +59,11 @@ legacy_path: relative to /eid. python_params: as the dashboard sends them; the l
 their translation (``legacy_query``), with ``legacy_params`` merged on top (None drops a
 translated parameter). fields: (legacy field, python field) pairs. legacy_aggregate: sum legacy
 rows sharing a key (the legacy grouped finer). stars: {✱: python fields or ALL} beyond the
-automatic ✱7. legacy_derive: adds computed fields to each legacy row.
+automatic ✱7. legacy_derive: adds computed fields to each legacy row. legacy_extra_paths: more
+legacy routes whose rows are added to legacy_path's (with legacy_aggregate, summed per key).
+legacy_lab_type_param: the legacy query parameter that carries ``lab_type`` (the /lab/all/*
+routes take ``labType``); without it ``lab_type`` must be the legacy route variant (a
+conventional/poc path segment).
 """
 
 STARS = {
@@ -129,6 +133,12 @@ CHECKS = [
           stars={"✱6": ALL}),
     Check("/dash/poc/indicators", f"{S}/indicators/", {"lab_type": "poc"}, *MONTH, INDICATORS,
           stars={"✱6": ALL}),
+    # KPI tiles: Python with no lab_type = the legacy pcr + poc responses summed per month. The two
+    # legacy RequestID-digit predicates (isnumeric(...) = 0 / = 1) split every row, so the sums do
+    # not depend on ✱6. Rejected is compared too: the legacy pcr (pos_rejected) and poc
+    # (pre_rejected) rules are the same SQL (code or description non-empty), as Python's rule.
+    Check("/dash/pcr/indicators", f"{S}/indicators/", {}, *MONTH, INDICATORS,
+          legacy_aggregate=True, legacy_extra_paths=("/dash/poc/indicators",)),
     Check("/dash/samples_positivity", f"{S}/positivity/", {}, *MONTH,
           [("Total", "tested"), ("Conventional", "conventional_positive"), ("Poc", "poc_positive"),
            ("positivity", "positivity")],
@@ -148,11 +158,14 @@ CHECKS = [
     Check("/lab/poc/samples_tested", f"{L}/tested_samples/", {"lab_type": "poc", "facility_type": "province"},
           ["RequestingProvinceName"], ["requesting_facility"], [("Total", "total"), ("Positivity", "positive")],
           legacy_params={"facilityType": None}),
-    Check("/lab/all/samples_tested_by_month", f"{L}/tested_samples_by_month/", {}, *MONTH,
-          [("Total", "total"), ("Positivity", "positive")]),
+    *[Check("/lab/all/samples_tested_by_month", f"{L}/tested_samples_by_month/", params, *MONTH,
+            [("Total", "total"), ("Positivity", "positive")], legacy_lab_type_param="labType")
+      for params in ({}, {"lab_type": "conventional"}, {"lab_type": "poc"})],
     Check("/lab/tat_samples", f"{L}/tat_samples/", {"category": "0"}, *TESTING_LAB, BRACKETS),
     Check("/lab/conventional/tat", f"{L}/tat/", {}, *TESTING_LAB, TAT),
-    Check("/lab/all/samples_registered_by_month", f"{L}/registered_samples_by_month/", {}, *MONTH, REGISTERED),
+    *[Check("/lab/all/samples_registered_by_month", f"{L}/registered_samples_by_month/", params, *MONTH,
+            REGISTERED, legacy_lab_type_param="labType")
+      for params in ({}, {"lab_type": "conventional"}, {"lab_type": "poc"})],
     Check("/lab/samples_by_equipment_monthly", f"{L}/samples_by_equipment_by_month/", {}, *MONTH,
           [("Tested", "tested"), *EQUIPMENT], stars=EQUIPMENT_STAR),
     Check("/lab/samples_by_equipment", f"{L}/samples_by_equipment/", {}, *TESTING_LAB,
@@ -202,9 +215,9 @@ def lab_checks(lab_code):
               ["ReceivingFacilityName"], ["receiving_facility"], REJECTION),
         Check("/lab/rejected_samples_monthly", f"{L}/rejected_samples_by_month/", lab, *MONTH, REJECTION),
         Check("/lab/all/samples_tested_by_month", f"{L}/tested_samples_by_month/", lab, *MONTH,
-              [("Total", "total"), ("Positivity", "positive")]),
+              [("Total", "total"), ("Positivity", "positive")], legacy_lab_type_param="labType"),
         Check("/lab/all/samples_registered_by_month", f"{L}/registered_samples_by_month/", lab, *MONTH,
-              REGISTERED),
+              REGISTERED, legacy_lab_type_param="labType"),
     ]
 
 
@@ -228,8 +241,12 @@ _LOCATION_PARAMS = ("province", "district", "health_facility")
 _PASS_THROUGH = ("category", "disaggregation")
 
 
-def translate_params(params, lab_names=None):
-    """Python query parameters -> the legacy ones (lists stay lists)."""
+def translate_params(params, lab_names=None, lab_type_param=None):
+    """Python query parameters -> the legacy ones (lists stay lists).
+
+    ``lab_type`` goes to ``lab_type_param`` when the legacy route takes one (``all`` = not sent);
+    otherwise the legacy route variant carries it.
+    """
     lab_names = lab_names or {}
     legacy = {}
     for name, value in params.items():
@@ -243,15 +260,16 @@ def translate_params(params, lab_names=None):
         elif name in _PASS_THROUGH:
             legacy[name] = values[0]
         elif name == "lab_type":
-            continue  # the legacy route variant (conventional/poc path) or an explicit legacy param
+            if lab_type_param and values[0] != "all":
+                legacy[lab_type_param] = values[0]
         else:
             raise ValueError(f"no legacy translation for parameter {name!r}")
     return legacy
 
 
-def legacy_query(start, end, params, extra=None, lab_names=None):
+def legacy_query(start, end, params, extra=None, lab_names=None, lab_type_param=None):
     """The legacy query: ``dates[0]``/``dates[1]`` and the translated parameters (qs indices)."""
-    legacy = translate_params(params, lab_names)
+    legacy = translate_params(params, lab_names, lab_type_param)
     legacy.update(extra or {})
     return node_query(start, end, {name: value for name, value in legacy.items() if value is not None})
 
@@ -272,8 +290,8 @@ def _is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _marks(check, field, legacy_value, python_value):
-    """The expected ✱ that explain one field difference (empty: unexpected)."""
+def _marks(check, field):
+    """The expected ✱ that may explain a difference in ``field`` (empty: none)."""
     marks = []
     if any(word in field for word in RESULT_WORDS):
         marks.append("✱7")
@@ -303,8 +321,12 @@ def field_summaries(check, legacy_index, python_index):
         differing = [(a, b) for a, b in rows if not same_value(a, b)]
         if not differing:
             continue
-        per_row = [_marks(check, python_field, a, b) for a, b in differing]
+        # A ✱ explains a value shift only: a field missing (or not a number) on either side is
+        # never expected, whatever ✱ the field carries.
+        per_row = [_marks(check, python_field) if _is_number(a) and _is_number(b) else []
+                   for a, b in differing]
         expected = all(per_row)
+        absent = sum(1 for a, b in differing if not (_is_number(a) and _is_number(b)))
         label = " ".join(sorted({m for marks in per_row for m in marks}, key=lambda m: int(m[1:])))
         legacy_total = sum(_number(a) for a, _ in rows)
         python_total = sum(_number(b) for _, b in rows)
@@ -313,6 +335,8 @@ def field_summaries(check, legacy_index, python_index):
             scope = f"average over {len(rows)} row(s), {len(differing)} differ"
         else:
             scope = f"in {len(differing)} row(s)"
+        if absent:
+            scope += f", {absent} with the field missing"
         summaries.append((expected, (
             f"{label if expected else 'UNEXPECTED'} {python_field}: legacy {legacy_total} -> python "
             f"{python_total} ({_shift(legacy_total, python_total)}) {scope}"
@@ -325,14 +349,49 @@ def legacy_end(end):
     return (date.fromisoformat(end) + timedelta(days=1)).isoformat()
 
 
+_MONTH_KEYS = ("Year", "Month", "year", "month")
+
+
+def _int_month_keys(rows, keys):
+    """Year / month as int on both sides ("2025" and 2025 are the same row)."""
+    month_keys = [k for k in keys if k in _MONTH_KEYS]
+    if not month_keys:
+        return rows
+    out = []
+    for row in rows:
+        row = dict(row)
+        for key in month_keys:
+            value = row.get(key)
+            if isinstance(value, str) and value.strip().isdigit():
+                row[key] = int(value.strip())
+        out.append(row)
+    return out
+
+
+def _within_window(rows, keys, end):
+    """Drop legacy month rows after the window's end month: the extra day asked for (R21) can only
+    add rows stamped at 00:00 of the next day, which would form a month Python never has."""
+    if keys[:2] != ["Year", "Month"]:
+        return rows
+    last = date.fromisoformat(end)
+    return [row for row in rows
+            if not (_is_number(row.get("Year")) and _is_number(row.get("Month"))
+                    and (row["Year"], row["Month"]) > (last.year, last.month))]
+
+
 def run_check(check, window, fetch, legacy_base, python_base, headers, lab_names=None):
     """(status, lines): status OK, "EXPECTED ✱" or DIFF; lines = field summaries, then row details."""
     start, end = window
-    legacy_rows = _rows(fetch(
-        legacy_base, LEGACY_PREFIX + check.legacy_path,
-        legacy_query(start, legacy_end(end), check.python_params, check.legacy_params, lab_names), {},
-    ))
-    python_rows = _rows(fetch(python_base, check.python_path, python_query(start, end, check.python_params), headers))
+    query = legacy_query(start, legacy_end(end), check.python_params, check.legacy_params, lab_names,
+                         check.legacy_lab_type_param)
+    legacy_rows = []
+    for path in (check.legacy_path, *check.legacy_extra_paths):
+        legacy_rows += _rows(fetch(legacy_base, LEGACY_PREFIX + path, query, {}))
+    legacy_rows = _within_window(_int_month_keys(legacy_rows, check.legacy_keys), check.legacy_keys, end)
+    python_rows = _int_month_keys(
+        _rows(fetch(python_base, check.python_path, python_query(start, end, check.python_params), headers)),
+        check.python_keys,
+    )
     if check.legacy_derive:
         legacy_rows = [check.legacy_derive(row) for row in legacy_rows]
 
@@ -391,7 +450,8 @@ def main(argv=None, fetch=http_fetch):
             params = "&".join(
                 f"{k}={','.join(v) if isinstance(v, list) else v}" for k, v in check.python_params.items()
             )
-            print(f"{status:11} {LEGACY_PREFIX}{check.legacy_path} -> {check.python_path}{'?' + params if params else ''}")
+            legacy = " + ".join(LEGACY_PREFIX + path for path in (check.legacy_path, *check.legacy_extra_paths))
+            print(f"{status:11} {legacy} -> {check.python_path}{'?' + params if params else ''}")
             # Field summaries first (all of them), then the first rows that differ.
             summaries = [line for line in lines if not line.startswith("(")]
             details = [line for line in lines if line.startswith("(")]

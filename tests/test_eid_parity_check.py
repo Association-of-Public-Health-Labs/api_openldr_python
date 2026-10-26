@@ -298,7 +298,7 @@ def test_every_legacy_route_is_covered_or_skipped():
     covered = {check.legacy_path for check in parity.CHECKS}
     assert covered.isdisjoint(parity.SKIPPED)
     assert covered | set(parity.SKIPPED) == _legacy_routes()
-    assert len(parity.CHECKS) == 32
+    assert len(parity.CHECKS) == 37  # 32 card routes + KPI tiles + 4 lab/all Convencional/PoC selects
 
 
 def test_every_check_points_at_a_registered_python_route():
@@ -308,3 +308,159 @@ def test_every_check_points_at_a_registered_python_route():
         registered = set(re.findall(r'"(/hiv/eid/[^"]+)"', handle.read()))
     for check in parity.CHECKS + parity.lab_checks("PMB"):
         assert check.python_path in registered, check.python_path
+
+
+# --------------------------------------------------------------------------- review fix round 1
+
+
+def _month_row(legacy, **values):
+    keys = {"Year": 2025, "Month": 1} if legacy else {"year": 2025, "month": 1}
+    return {**keys, **values}
+
+
+def test_a_starred_field_missing_in_legacy_is_unexpected():
+    check = _check("/dash/pcr/indicators", {"lab_type": "conventional"})  # ✱6 on every field
+
+    def fetch(base, path, params, headers):
+        if base == "legacy":
+            return [_month_row(True)]
+        return [_month_row(False, registered=5, tested=4, rejected=1, pending=0)]
+
+    status, lines = parity.run_check(check, WINDOW, fetch, "legacy", "python", {})
+    assert status == "DIFF"
+    assert any(line.startswith("UNEXPECTED registered") and "field missing" in line for line in lines)
+
+
+def test_a_starred_field_missing_in_python_is_unexpected():
+    check = _check("/clinic/samples_tested_gender_province")  # ✱7 on every field
+
+    def fetch(base, path, params, headers):
+        if base == "legacy":
+            return [{"facility": "Gaza", "Masculino Positivo": 10, "Masculino Negativo": 1,
+                     "Feminino Positivo": 2, "Feminino Negativo": 3}]
+        return [{"requesting_facility": "Gaza"}]
+
+    status, lines = parity.run_check(check, WINDOW, fetch, "legacy", "python", {})
+    assert status == "DIFF"
+    assert any(line.startswith("UNEXPECTED male_positive") for line in lines)
+
+
+def _kpi_check():
+    return next(c for c in parity.CHECKS if c.legacy_extra_paths == ("/dash/poc/indicators",))
+
+
+def test_kpi_tiles_compare_python_all_with_legacy_pcr_plus_poc():
+    check = _kpi_check()
+    assert check.python_path == "/hiv/eid/summary/indicators/" and check.python_params == {}
+    assert not check.stars  # registered, tested, rejected untagged; pending gets ✱7 by name
+    calls = []
+
+    def fetch(base, path, params, headers):
+        calls.append(path)
+        if path == "/eid/dash/pcr/indicators":
+            return [_month_row(True, Registados=7, Testados=5, Rejeitados=1, Pendentes=1)]
+        if path == "/eid/dash/poc/indicators":
+            return [_month_row(True, Registados=3, Testados=3, Rejeitados=0, Pendentes=0)]
+        return [_month_row(False, registered=10, tested=8, rejected=1, pending=2)]
+
+    status, lines = parity.run_check(check, WINDOW, fetch, "legacy", "python", {})
+    assert calls == ["/eid/dash/pcr/indicators", "/eid/dash/poc/indicators", "/hiv/eid/summary/indicators/"]
+    assert status == "EXPECTED ✱"
+    assert lines[0].startswith("✱7 pending: legacy 1 -> python 2")
+
+
+def test_kpi_tiles_registered_difference_fails():
+    def fetch(base, path, params, headers):
+        if base == "legacy":
+            return [_month_row(True, Registados=5, Testados=4, Rejeitados=0, Pendentes=1)]
+        return [_month_row(False, registered=11, tested=8, rejected=0, pending=2)]
+
+    status, lines = parity.run_check(_kpi_check(), WINDOW, fetch, "legacy", "python", {})
+    assert status == "DIFF"
+    assert any(line.startswith("UNEXPECTED registered") for line in lines)
+
+
+def test_legacy_month_after_the_window_is_dropped():
+    """End + 1 day (R21) can give the legacy a month the window does not have."""
+    check = _check("/lab/all/samples_registered_by_month", {})
+
+    def fetch(base, path, params, headers):
+        if base == "legacy":
+            return [{"Year": 2025, "Month": 12, "Total": 3, "Conventional": 3, "Poc": 0},
+                    {"Year": 2026, "Month": 1, "Total": 1, "Conventional": 1, "Poc": 0}]
+        return [{"year": 2025, "month": 12, "total": 3, "conventional": 3, "poc": 0}]
+
+    assert parity.run_check(check, WINDOW, fetch, "legacy", "python", {}) == ("OK", [])
+
+
+def test_year_and_month_match_as_int_on_both_sides():
+    check = _check("/lab/all/samples_registered_by_month", {})
+
+    def fetch(base, path, params, headers):
+        if base == "legacy":
+            return [{"Year": "2025", "Month": "12", "Total": 3, "Conventional": 3, "Poc": 0}]
+        return [{"year": 2025, "month": 12, "total": 3, "conventional": 3, "poc": 0}]
+
+    assert parity.run_check(check, WINDOW, fetch, "legacy", "python", {}) == ("OK", [])
+
+
+@pytest.mark.parametrize("lab_type", ["conventional", "poc"])
+def test_lab_all_selects_send_labtype(lab_type):
+    sent = {}
+
+    def fetch(base, path, params, headers):
+        sent[(base, path)] = params
+        return []
+
+    for path in ("/lab/all/samples_tested_by_month", "/lab/all/samples_registered_by_month"):
+        check = _check(path, {"lab_type": lab_type})
+        parity.run_check(check, WINDOW, fetch, "legacy", "python", {})
+        assert ("labType", lab_type) in sent[("legacy", "/eid" + path)]
+        assert ("lab_type", lab_type) in sent[("python", check.python_path)]
+    check = _check("/lab/all/samples_tested_by_month", {})
+    parity.run_check(check, WINDOW, fetch, "legacy", "python", {})
+    assert not any(name == "labType" for name, _ in sent[("legacy", "/eid/lab/all/samples_tested_by_month")])
+
+
+def test_every_lab_type_reaches_the_legacy_side():
+    """A lab_type is either the legacy route variant (path segment) or a legacy parameter."""
+    for check in parity.CHECKS + parity.lab_checks("PMB"):
+        lab_type = check.python_params.get("lab_type")
+        if lab_type and lab_type != "all":
+            segments = {"conventional": ("/conventional/", "/pcr/"), "poc": ("/poc/",)}[lab_type]
+            assert check.legacy_lab_type_param or any(seg in check.legacy_path for seg in segments), check
+
+
+# Fields the Python service computes after the query (not SQL column labels).
+_COMPUTED = {"positivity", "category"}
+
+
+def _service_for(app, path):
+    """The service function the controller at ``path`` hands to run_reporting_endpoint."""
+    import sys
+    from unittest.mock import patch
+
+    endpoint, _ = app.url_map.bind("localhost").match(path)
+    view_class = app.view_functions[endpoint].view_class
+    module = sys.modules[view_class.__module__]
+    captured = {}
+    with patch.object(module, "run_reporting_endpoint", lambda parse, service: captured.setdefault("s", service)):
+        with app.test_request_context(path):
+            view_class().get()
+    return captured["s"]
+
+
+def test_every_python_field_read_is_a_column_of_the_service_sql(app):
+    from tests.hiv.sql_capture import service_sql
+
+    for check in parity.CHECKS + parity.lab_checks("PMB"):
+        service = _service_for(app, check.python_path)
+        args = {"interval_dates": ["2025-01-01,2025-12-31"], **check.python_params}
+        _, sql = service_sql(app, service, args)
+        assert sql, check.python_path
+        text = " ".join(sql)
+        wanted = [f for _, f in check.fields] + list(check.python_keys)
+        for field in wanted:
+            if field in _COMPUTED:
+                continue
+            assert re.search(rf"AS \[?{re.escape(field)}\]?(\W|$)", text), (check.python_path, field)
