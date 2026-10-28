@@ -159,14 +159,14 @@ def laboratory_labs_service(req_args):
         ):
             rows = (
                 EIDMaster.query.with_entities(code.label("code"), name.label("name"))
-                .filter(and_(code.is_not(None), condition))
+                .filter(and_(code.is_not(None), name.is_not(None), condition))
                 .distinct()
-                .order_by(name)
+                .order_by(name, code)
                 .all()
             )
             labs += [dict(code=row.code, name=row.name, lab_type=lab_type) for row in rows]
         # Stable sort: conventional stays before poc within a name.
-        return sorted(labs, key=lambda lab: lab["name"] or "")
+        return sorted(labs, key=lambda lab: (lab["name"], lab["code"]))
     except Exception as e:
         return _error(e)
 
@@ -295,7 +295,7 @@ def tested_samples_service(req_args):
             )
             .filter(and_(*filters))
             .group_by(*code_cols, column)
-            .order_by(column)
+            .order_by(column, *code_cols)
             .all()
         )
         return [
@@ -340,7 +340,7 @@ def tat_service(req_args):
             )
             .filter(and_(*filters))
             .group_by(*code_cols, *group_cols)
-            .order_by(*group_cols)
+            .order_by(*group_cols, *code_cols)
             .all()
         )
         names = ([name for name, _ in parents] + [key]
@@ -373,7 +373,7 @@ def tat_samples_service(req_args):
             )
             .filter(and_(*filters))
             .group_by(EIDMaster.TestingFacilityCode, EIDMaster.TestingFacilityName)
-            .order_by(EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName, EIDMaster.TestingFacilityCode)
             .all()
         )
         return [
@@ -417,7 +417,7 @@ def rejected_samples_service(req_args):
             )
             .filter(and_(*_rejected_filters(params)))
             .group_by(EIDMaster.ReceivingFacilityCode, EIDMaster.ReceivingFacilityName)
-            .order_by(EIDMaster.ReceivingFacilityName)
+            .order_by(EIDMaster.ReceivingFacilityName, EIDMaster.ReceivingFacilityCode)
             .all()
         )
         return [
@@ -478,7 +478,7 @@ def samples_by_equipment_service(req_args):
             )
             .filter(and_(*filters))
             .group_by(EIDMaster.TestingFacilityCode, EIDMaster.TestingFacilityName)
-            .order_by(EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName, EIDMaster.TestingFacilityCode)
             .all()
         )
         return [

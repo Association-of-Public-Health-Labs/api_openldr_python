@@ -434,7 +434,8 @@ def test_labs_lists_distinct_codes_by_lab_type(app):
         assert "[EIDMaster].[TestingFacilityCode]" in sql
         assert "[EIDMaster].[TestingFacilityName]" in sql
         assert "[EIDMaster].[TestingFacilityCode] IS NOT NULL" in sql
-        assert "ORDER BY [EIDMaster].[TestingFacilityName]" in sql
+        assert "[EIDMaster].[TestingFacilityName] IS NOT NULL" in sql
+        assert "ORDER BY [EIDMaster].[TestingFacilityName], [EIDMaster].[TestingFacilityCode]" in sql
     assert CONVENTIONAL in conventional and POC not in conventional
     assert POC in poc and CONVENTIONAL not in poc
 
@@ -454,7 +455,8 @@ def test_labs_rows_shape_orders_by_name_and_keeps_both_types(app):
 def test_tested_samples_lab_level_groups_by_code(app):
     _, [sql] = service_sql(app, lab.tested_samples_service, ARGS)
     assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
-    assert "ORDER BY [EIDMaster].[TestingFacilityName]" in sql
+    assert ("ORDER BY [EIDMaster].[TestingFacilityName], "
+            "[EIDMaster].[TestingFacilityCode]") in sql
     assert "AS testing_facility_code" in sql
 
 
@@ -480,7 +482,8 @@ def test_tested_samples_province_level_has_no_code(app, level):
 def test_tat_lab_level_groups_by_code(app):
     _, [sql] = service_sql(app, lab.tat_service, ARGS)
     assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
-    assert "ORDER BY [EIDMaster].[TestingFacilityName]" in sql
+    assert ("ORDER BY [EIDMaster].[TestingFacilityName], "
+            "[EIDMaster].[TestingFacilityCode]") in sql
     assert "AS testing_facility_code" in sql
     tat = dict(zip(TAT_KEYS, range(1, 7)))
     data = row(testing_facility="Lab A", testing_facility_code="PJV", **tat)
@@ -497,6 +500,8 @@ def test_tat_samples_returns_testing_code(app):
     _, [sql] = service_sql(app, lab.tat_samples_service, {**ARGS, "category": "2"})
     assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
     assert "AS testing_facility_code" in sql
+    assert ("ORDER BY [EIDMaster].[TestingFacilityName], "
+            "[EIDMaster].[TestingFacilityCode]") in sql
     data = row(testing_facility="Lab A", testing_facility_code="PJV", lt_7=5, between_7_15=4,
                between_16_21=3, gt_21=2, no_dates=1)
     result, _ = service_sql(
@@ -510,6 +515,8 @@ def test_samples_by_equipment_returns_testing_code(app):
     _, [sql] = service_sql(app, lab.samples_by_equipment_service, ARGS)
     assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
     assert "AS testing_facility_code" in sql
+    assert ("ORDER BY [EIDMaster].[TestingFacilityName], "
+            "[EIDMaster].[TestingFacilityCode]") in sql
     groups = dict(zip(EQUIPMENT, range(1, 8)))
     data = row(testing_facility="Lab A", testing_facility_code="PJV", tested=40, **groups)
     result, _ = service_sql(app, lab.samples_by_equipment_service, ARGS, results=[[data]])
@@ -521,7 +528,8 @@ def test_rejected_samples_returns_receiving_code(app):
     _, [sql] = service_sql(app, lab.rejected_samples_service, ARGS)
     assert ("GROUP BY [EIDMaster].[ReceivingFacilityCode], "
             "[EIDMaster].[ReceivingFacilityName]") in sql
-    assert "ORDER BY [EIDMaster].[ReceivingFacilityName]" in sql
+    assert ("ORDER BY [EIDMaster].[ReceivingFacilityName], "
+            "[EIDMaster].[ReceivingFacilityCode]") in sql
     assert "AS receiving_facility_code" in sql
     reasons = dict(zip(REASONS, range(1, 10)))
     data = row(receiving_facility="Lab A", receiving_facility_code="PJV", total=50, **reasons)

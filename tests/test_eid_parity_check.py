@@ -491,3 +491,43 @@ def test_row_counts_are_printed_for_ok_checks(tmp_path, capsys):
 
 def test_allow_empty_does_not_fail_the_run(tmp_path):
     assert _run_main(tmp_path, lambda *a: [], extra=["--allow-empty"]) == 0
+
+
+# A lab name with two codes comes back as two Python rows (plan 2c, L2).
+def _lab_fetch(legacy, python):
+    return lambda base, path, params, headers: legacy if base == "legacy" else python
+
+
+def test_lab_rows_split_by_code_are_summed_per_name():
+    check = _check("/lab/conventional/samples_tested")
+    legacy = [{"TestingFacilityName": "Lab A", "Total": 10, "Positivity": 3}]
+    python = [
+        {"testing_facility": "Lab A", "testing_facility_code": "A1", "total": 6, "positive": 2},
+        {"testing_facility": "Lab A", "testing_facility_code": "A2", "total": 4, "positive": 1},
+    ]
+    assert parity.run_check(check, WINDOW, _lab_fetch(legacy, python), "legacy", "python", {}) == ("OK", [])
+
+
+def test_lab_rows_split_by_code_still_report_a_real_difference():
+    check = _check("/lab/conventional/samples_tested")
+    legacy = [{"TestingFacilityName": "Lab A", "Total": 11, "Positivity": 3}]
+    python = [
+        {"testing_facility": "Lab A", "testing_facility_code": "A1", "total": 6, "positive": 2},
+        {"testing_facility": "Lab A", "testing_facility_code": "A2", "total": 4, "positive": 1},
+    ]
+    status, lines = parity.run_check(check, WINDOW, _lab_fetch(legacy, python), "legacy", "python", {})
+    assert status == "DIFF" and any("Total" in line for line in lines)
+
+
+def test_tat_name_with_two_codes_is_a_duplicate_name_not_an_overwrite():
+    check = _check("/lab/conventional/tat")
+    tat_legacy = {legacy: 2 for legacy, _ in parity.TAT}
+    legacy = [{"TestingFacilityName": "Lab A", **tat_legacy}]
+    tat_python = {py: 2 for _, py in parity.TAT}
+    python = [
+        {"testing_facility": "Lab A", "testing_facility_code": "A1", **tat_python},
+        {"testing_facility": "Lab A", "testing_facility_code": "A2", **tat_python},
+    ]
+    status, lines = parity.run_check(check, WINDOW, _lab_fetch(legacy, python), "legacy", "python", {})
+    assert status == "DIFF"
+    assert any("DUPLICATE NAME" in line and "Lab A" in line for line in lines)
