@@ -1,6 +1,7 @@
 """
 Default reports the dashboards request on their first screen, recorded from the VL and TB apps
-(2026-10-21). The warm-up computes these even when the cache is empty (after a deploy); anything
+(2026-10-21); the EID ones are the default request of every card of the new EID dashboard (spec
+2026-10-26 §4.3). The warm-up computes these even when the cache is empty (after a deploy); anything
 else a visitor opened in the default period is in the cache already and gets recomputed with them.
 
 Each seed is (path, window, params). Parameters are written as the dashboards send them: the cache
@@ -82,9 +83,56 @@ TB_SEEDS = [
 ]
 
 
+# The EID dashboard sends no lab_type and no category on its default requests (the API defaults:
+# lab_type all, category 0), and facility routes as VL's. Cards fixed to one lab type send exactly
+# lab_type=conventional / lab_type=poc (ruling R22). Map drills, the province page and patient
+# routes carry a place or are never cached, so they are not seeds.
+_EID = "/hiv/eid"
+_EID_FACILITY = {"facility_type": ["province"], "disaggregation": ["false"]}
+
+EID_SEEDS = [
+    # Sumário
+    (f"{_EID}/summary/indicators/", YEAR, {}),
+    (f"{_EID}/summary/indicators/", YEAR, {"lab_type": ["conventional"]}),  # Principais Indicadores tabs
+    (f"{_EID}/summary/indicators/", YEAR, {"lab_type": ["poc"]}),
+    (f"{_EID}/summary/positivity/", YEAR, {}),
+    (f"{_EID}/summary/indicators_by_province/", YEAR, {}),
+    (f"{_EID}/summary/tat/", YEAR, {}),
+    (f"{_EID}/summary/tat_samples/", YEAR, {}),
+    (f"{_EID}/summary/rejected_samples_by_month/", YEAR, {}),
+    (f"{_EID}/summary/samples_by_equipment_by_month/", YEAR, {}),
+    # Laboratório
+    (f"{_EID}/laboratories/tested_samples/", YEAR, {}),
+    (f"{_EID}/laboratories/tested_samples/", YEAR, {"lab_type": ["conventional"]}),  # Testadas por lab/Convencional
+    # Testadas por lab/PoC opens per province (ruling R18).
+    (f"{_EID}/laboratories/tested_samples/", YEAR, {"lab_type": ["poc"], "facility_type": ["province"]}),
+    (f"{_EID}/laboratories/tested_samples_by_month/", YEAR, {}),
+    (f"{_EID}/laboratories/registered_samples_by_month/", YEAR, {}),
+    (f"{_EID}/laboratories/tat_samples/", YEAR, {}),
+    (f"{_EID}/laboratories/tat/", YEAR, {}),
+    (f"{_EID}/laboratories/samples_by_equipment_by_month/", YEAR, {}),
+    (f"{_EID}/laboratories/samples_by_equipment/", YEAR, {}),
+    (f"{_EID}/laboratories/rejected_samples_by_month/", YEAR, {}),
+    (f"{_EID}/laboratories/rejected_samples/", YEAR, {}),
+    # Província / Distrito / US
+    (f"{_EID}/facilities/registered_samples/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/registered_samples_by_month/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/tested_samples/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/tested_samples_by_month/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/rejected_samples/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/rejected_samples_by_month/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/tested_samples_by_gender/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/tested_samples_by_gender_by_month/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/tat_avg/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/tat_avg_by_month/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/tat_days/", YEAR, _EID_FACILITY),
+    (f"{_EID}/facilities/tat_days_by_month/", YEAR, _EID_FACILITY),
+]
+
+
 def seed_keys():
     """The seeds as cache keys (same shape as ``report_cache.cache_key``)."""
     return [
         {"path": path, "window": window, "params": dict(sorted(params.items()))}
-        for path, window, params in VL_SEEDS + TB_SEEDS
+        for path, window, params in VL_SEEDS + TB_SEEDS + EID_SEEDS
     ]

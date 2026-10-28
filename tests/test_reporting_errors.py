@@ -80,3 +80,25 @@ def test_patients_parser_accepts_drill_down_filters(client, auth_headers):
     req_args = service.call_args[0][0]
     assert (req_args["pregnant"], req_args["breastfeeding"], req_args["rejected"]) == ("true", "false", "1")
     assert req_args["lab_code"] == ["PCD"] and req_args["age_range"] == ["15,49"]
+
+
+EID_SUMMARY_URL = "/hiv/eid/summary/indicators/"
+EID_SUMMARY_TARGET = "hiv.eid.controllers.eid_controller_summary.summary_indicators_service"
+
+
+def test_eid_service_error_500_hides_detail(client, auth_headers):
+    leaked = {
+        "status": "error", "code": 500, "message": "An Error Occurred",
+        "error": "(pyodbc.OperationalError) [SQL: SELECT [EIDMaster].[RequestID] FROM EIDMaster]",
+    }
+    with patch(EID_SUMMARY_TARGET, return_value=leaked):
+        response = client.get(EID_SUMMARY_URL, headers=auth_headers)
+    assert response.status_code == 500
+    assert response.get_json() == {"status": "error", "code": 500, "message": "An error occurred"}
+    assert b"SELECT" not in response.data and b"pyodbc" not in response.data
+
+
+def test_eid_invalid_parameter_is_400(client, auth_headers):
+    response = client.get(EID_SUMMARY_URL + "?lab_type=foo", headers=auth_headers)
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "error"
