@@ -119,7 +119,7 @@ def test_registered_by_month_rows_shape(app):
 def test_tested_conventional_by_lab(app):
     _, [sql] = service_sql(app, lab.tested_samples_service, {**ARGS, "lab_type": "conventional"})
     assert window("AnalysisDateTime") in sql
-    assert "GROUP BY [EIDMaster].[TestingFacilityName]" in sql
+    assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
     assert NOT_REJECTED in sql
     assert "[EIDMaster].[IsPoc] = 'No'" in sql and CONVENTIONAL in sql
     assert "[EIDMaster].[TestingFacilityName] IS NOT NULL" in sql
@@ -158,6 +158,8 @@ def test_tested_drill_levels(app, extra, group):
     _, [sql] = service_sql(
         app, lab.tested_samples_service, {**ARGS, "lab_type": "conventional", **extra}
     )
+    if group == "TestingFacilityName":  # lab level also groups by the code (L2)
+        group = "TestingFacilityCode], [EIDMaster].[TestingFacilityName"
     assert f"GROUP BY [EIDMaster].[{group}]" in sql
 
 
@@ -184,9 +186,11 @@ def test_tested_no_null_province_exclusion(app):
 
 
 def test_tested_rows_shape_lab_and_requesting(app):
-    data = row(testing_facility="Lab A", total=10, positive=1, negative=9)
+    data = row(testing_facility="Lab A", testing_facility_code="PJV", total=10, positive=1,
+               negative=9)
     result, _ = service_sql(app, lab.tested_samples_service, ARGS, results=[[data]])
-    assert result == [dict(testing_facility="Lab A", total=10, positive=1, negative=9)]
+    assert result == [dict(testing_facility="Lab A", testing_facility_code="PJV", total=10,
+                           positive=1, negative=9)]
 
     data = row(requesting_facility="Gaza", total=10, positive=1, negative=9)
     result, _ = service_sql(
@@ -199,7 +203,7 @@ def test_tested_rows_shape_lab_and_requesting(app):
 def test_tat_by_lab_with_lab_tat_filters(app):
     _, [sql] = service_sql(app, lab.tat_service, ARGS)
     assert window("AnalysisDateTime") in sql
-    assert "GROUP BY [EIDMaster].[TestingFacilityName]" in sql
+    assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
     assert NOT_REJECTED in sql  # legacy excludes rejected rows
     assert CONVENTIONAL in sql
     assert "[EIDMaster].[TestingFacilityCode] NOT IN ('PBC', 'PEM')" in sql
@@ -246,16 +250,16 @@ def test_tat_rows_shape_at_district_level(app):
 
 def test_tat_rows_shape_at_lab_level(app):
     tat = dict(zip(TAT_KEYS, range(1, 7)))
-    data = row(testing_facility="Lab A", **tat)
+    data = row(testing_facility="Lab A", testing_facility_code="PJV", **tat)
     result, _ = service_sql(app, lab.tat_service, ARGS, results=[[data]])
-    assert result == [dict(testing_facility="Lab A", **tat)]
+    assert result == [dict(testing_facility="Lab A", testing_facility_code="PJV", **tat)]
 
 
 # --- laboratories/tat_samples/ (lab/tat_samples) ------------------------------
 def test_tat_samples_per_lab_brackets(app):
     _, [sql] = service_sql(app, lab.tat_samples_service, {**ARGS, "category": "2"})
     assert window("AnalysisDateTime") in sql
-    assert "GROUP BY [EIDMaster].[TestingFacilityName]" in sql
+    assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
     assert "[EIDMaster].[TestingFacilityCode] NOT IN ('PBC', 'UEM')" in sql
     assert "BETWEEN 0 AND 90" not in sql  # no 90-day limit on this route
     days = "datediff(day, [EIDMaster].[LIMSPreReg_RegistrationDateTime], [EIDMaster].[ReceivedDateTime])"
@@ -280,12 +284,12 @@ def test_tat_samples_category_scale_is_zero_to_five(app, category, start, end):
 
 
 def test_tat_samples_rows_shape(app):
-    data = row(testing_facility="Lab A", lt_7=5, between_7_15=4, between_16_21=3,
-               gt_21=2, no_dates=1)
+    data = row(testing_facility="Lab A", testing_facility_code="PJV", lt_7=5, between_7_15=4,
+               between_16_21=3, gt_21=2, no_dates=1)
     result, _ = service_sql(
         app, lab.tat_samples_service, {**ARGS, "category": "5"}, results=[[data]]
     )
-    assert result == [dict(testing_facility="Lab A", category="analysis_validation", lt_7=5,
+    assert result == [dict(testing_facility="Lab A", testing_facility_code="PJV", category="analysis_validation", lt_7=5,
                            between_7_15=4, between_16_21=3, gt_21=2, no_dates=1)]
 
 
@@ -293,7 +297,8 @@ def test_tat_samples_rows_shape(app):
 def test_rejected_by_receiving_lab(app):
     _, [sql] = service_sql(app, lab.rejected_samples_service, ARGS)
     assert window("RegisteredDateTime") in sql
-    assert "GROUP BY [EIDMaster].[ReceivingFacilityName]" in sql
+    assert ("GROUP BY [EIDMaster].[ReceivingFacilityCode], "
+            "[EIDMaster].[ReceivingFacilityName]") in sql
     assert "[EIDMaster].[IsPoc] = 'No'" in sql
     assert REJECTED in sql
     for key in REASONS + ("total",):
@@ -310,9 +315,10 @@ def test_rejected_lab_code_is_receiving_facility(app):
 
 def test_rejected_rows_shape(app):
     reasons = dict(zip(REASONS, range(1, 10)))
-    data = row(receiving_facility="Lab A", total=50, **reasons)
+    data = row(receiving_facility="Lab A", receiving_facility_code="PJV", total=50, **reasons)
     result, _ = service_sql(app, lab.rejected_samples_service, ARGS, results=[[data]])
-    assert result == [dict(receiving_facility="Lab A", **reasons, total=50)]
+    assert result == [dict(receiving_facility="Lab A", receiving_facility_code="PJV",
+                           **reasons, total=50)]
 
 
 # --- laboratories/rejected_samples_by_month/ (lab/rejected_samples_monthly) ---
@@ -342,7 +348,7 @@ def test_rejected_by_month_rows_shape(app):
 def test_equipment_by_lab_excludes_pbc(app):
     _, [sql] = service_sql(app, lab.samples_by_equipment_service, ARGS)
     assert window("AnalysisDateTime") in sql
-    assert "GROUP BY [EIDMaster].[TestingFacilityName]" in sql
+    assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
     assert FINAL_STATUS in sql and "[EIDMaster].[IsPoc] = 'No'" in sql
     assert "[EIDMaster].[TestingFacilityCode] != 'PBC'" in sql
     assert "AS tested" in sql
@@ -358,9 +364,10 @@ def test_equipment_by_lab_lab_code(app):
 
 def test_equipment_by_lab_rows_shape(app):
     groups = dict(zip(EQUIPMENT, range(1, 8)))
-    data = row(testing_facility="Lab A", tested=40, **groups)
+    data = row(testing_facility="Lab A", testing_facility_code="PJV", tested=40, **groups)
     result, _ = service_sql(app, lab.samples_by_equipment_service, ARGS, results=[[data]])
-    assert result == [dict(testing_facility="Lab A", tested=40, **groups)]
+    assert result == [dict(testing_facility="Lab A", testing_facility_code="PJV", tested=40,
+                           **groups)]
 
 
 # --- laboratories/samples_by_equipment_by_month/ (lab/samples_by_equipment_monthly)
@@ -415,3 +422,109 @@ def test_every_card_service_rejects_bad_lab_type(app, service):
 
     with pytest.raises(InvalidParameter):
         service_sql(app, service, {**ARGS, "lab_type": "pcr"})
+
+
+# --- laboratories/labs/ and lab codes on lab-level rows (plan 2c, L1/L2) -------
+def test_labs_lists_distinct_codes_by_lab_type(app):
+    _, sqls = service_sql(app, lab.laboratory_labs_service, ARGS)
+    assert len(sqls) == 2
+    conventional, poc = sqls
+    for sql in sqls:
+        assert "DISTINCT" in sql
+        assert "[EIDMaster].[TestingFacilityCode]" in sql
+        assert "[EIDMaster].[TestingFacilityName]" in sql
+        assert "[EIDMaster].[TestingFacilityCode] IS NOT NULL" in sql
+        assert "ORDER BY [EIDMaster].[TestingFacilityName]" in sql
+    assert CONVENTIONAL in conventional and POC not in conventional
+    assert POC in poc and CONVENTIONAL not in poc
+
+
+def test_labs_rows_shape_orders_by_name_and_keeps_both_types(app):
+    conv = [row(code="PJV", name="Lab B"), row(code="PMB", name="Lab A")]
+    poc = [row(code="PJV", name="Lab B"), row(code="X1", name="Lab C")]
+    result, _ = service_sql(app, lab.laboratory_labs_service, ARGS, results=[conv, poc])
+    assert result == [
+        dict(code="PMB", name="Lab A", lab_type="conventional"),
+        dict(code="PJV", name="Lab B", lab_type="conventional"),
+        dict(code="PJV", name="Lab B", lab_type="poc"),
+        dict(code="X1", name="Lab C", lab_type="poc"),
+    ]
+
+
+def test_tested_samples_lab_level_groups_by_code(app):
+    _, [sql] = service_sql(app, lab.tested_samples_service, ARGS)
+    assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
+    assert "ORDER BY [EIDMaster].[TestingFacilityName]" in sql
+    assert "AS testing_facility_code" in sql
+
+
+def test_tested_samples_lab_level_row_has_code(app):
+    data = row(testing_facility="Lab A", testing_facility_code="PJV", total=10, positive=1,
+               negative=9)
+    result, _ = service_sql(app, lab.tested_samples_service, ARGS, results=[[data]])
+    assert result == [dict(testing_facility="Lab A", testing_facility_code="PJV", total=10,
+                           positive=1, negative=9)]
+
+
+@pytest.mark.parametrize("level", ["province", "district", "health_facility"])
+def test_tested_samples_province_level_has_no_code(app, level):
+    _, [sql] = service_sql(app, lab.tested_samples_service, {**ARGS, "facility_type": level})
+    assert "testing_facility_code" not in sql
+    data = row(requesting_facility="Gaza", total=10, positive=1, negative=9)
+    result, _ = service_sql(
+        app, lab.tested_samples_service, {**ARGS, "facility_type": level}, results=[[data]]
+    )
+    assert result == [dict(requesting_facility="Gaza", total=10, positive=1, negative=9)]
+
+
+def test_tat_lab_level_groups_by_code(app):
+    _, [sql] = service_sql(app, lab.tat_service, ARGS)
+    assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
+    assert "ORDER BY [EIDMaster].[TestingFacilityName]" in sql
+    assert "AS testing_facility_code" in sql
+    tat = dict(zip(TAT_KEYS, range(1, 7)))
+    data = row(testing_facility="Lab A", testing_facility_code="PJV", **tat)
+    result, _ = service_sql(app, lab.tat_service, ARGS, results=[[data]])
+    assert result == [dict(testing_facility="Lab A", testing_facility_code="PJV", **tat)]
+
+
+def test_tat_below_lab_level_has_no_code(app):
+    _, [sql] = service_sql(app, lab.tat_service, {**ARGS, "facility_type": "province"})
+    assert "testing_facility_code" not in sql
+
+
+def test_tat_samples_returns_testing_code(app):
+    _, [sql] = service_sql(app, lab.tat_samples_service, {**ARGS, "category": "2"})
+    assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
+    assert "AS testing_facility_code" in sql
+    data = row(testing_facility="Lab A", testing_facility_code="PJV", lt_7=5, between_7_15=4,
+               between_16_21=3, gt_21=2, no_dates=1)
+    result, _ = service_sql(
+        app, lab.tat_samples_service, {**ARGS, "category": "5"}, results=[[data]]
+    )
+    assert result[0]["testing_facility_code"] == "PJV"
+    assert result[0]["testing_facility"] == "Lab A"
+
+
+def test_samples_by_equipment_returns_testing_code(app):
+    _, [sql] = service_sql(app, lab.samples_by_equipment_service, ARGS)
+    assert "GROUP BY [EIDMaster].[TestingFacilityCode], [EIDMaster].[TestingFacilityName]" in sql
+    assert "AS testing_facility_code" in sql
+    groups = dict(zip(EQUIPMENT, range(1, 8)))
+    data = row(testing_facility="Lab A", testing_facility_code="PJV", tested=40, **groups)
+    result, _ = service_sql(app, lab.samples_by_equipment_service, ARGS, results=[[data]])
+    assert result == [dict(testing_facility="Lab A", testing_facility_code="PJV", tested=40,
+                           **groups)]
+
+
+def test_rejected_samples_returns_receiving_code(app):
+    _, [sql] = service_sql(app, lab.rejected_samples_service, ARGS)
+    assert ("GROUP BY [EIDMaster].[ReceivingFacilityCode], "
+            "[EIDMaster].[ReceivingFacilityName]") in sql
+    assert "ORDER BY [EIDMaster].[ReceivingFacilityName]" in sql
+    assert "AS receiving_facility_code" in sql
+    reasons = dict(zip(REASONS, range(1, 10)))
+    data = row(receiving_facility="Lab A", receiving_facility_code="PJV", total=50, **reasons)
+    result, _ = service_sql(app, lab.rejected_samples_service, ARGS, results=[[data]])
+    assert result == [dict(receiving_facility="Lab A", receiving_facility_code="PJV",
+                           **reasons, total=50)]

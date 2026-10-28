@@ -1,6 +1,7 @@
 from flask_restful import Resource
 
 from hiv.eid.services.eid_services_laboratory import (
+    laboratory_labs_service,
     tested_samples_by_month_service,
     registered_samples_by_month_service,
     tested_samples_service,
@@ -19,6 +20,31 @@ from utilities.controller_helpers import STR_ARG, build_common_parser, run_repor
 _parser = eid_parser
 # The map viewport (south,west,north,east) only applies to the viewport route.
 _viewport_parser = build_common_parser(extra_args=EID_FILTER_ARGS + [("viewport", STR_ARG)])
+
+
+class EidLaboratoryLabs(Resource):
+    def get(self):
+        """
+        EID labs and PoC sites with their codes
+
+        The distinct testing labs (TestingFacilityCode and TestingFacilityName,
+        code not null) of the EID data, per lab type: conventional (IsPoc 'No',
+        not a PIMA analyzer) and poc (IsPoc 'Yes' or a PIMA analyzer). A code
+        seen under both types appears once per type. Sorted by name. Takes no
+        parameters: no date window, no filter. Use the code as lab_code on the
+        other laboratories routes, and to drill down from a lab bar.
+        ---
+        tags:
+            - HIV EID/Laboratories
+        responses:
+            200:
+                description: "Rows: code, name, lab_type ('conventional' or 'poc')"
+            401:
+                description: Missing or invalid JWT token
+            500:
+                description: An Error Occurred
+        """
+        return run_reporting_endpoint(_parser.parse_args, laboratory_labs_service)
 
 
 class EidTestedSamplesByMonth(Resource):
@@ -105,8 +131,9 @@ class EidTestedSamples(Resource):
         drills one level down (lab -> province -> district -> health_facility).
         To drill from a clicked bar, send facility_type = its level, its name
         or code in lab_code / province / district, and disaggregation=true.
-        Rows carry testing_facility at the lab level, requesting_facility at
-        the others. lab_code filters TestingFacilityCode. ✱5 the end day is
+        Rows carry testing_facility and testing_facility_code at the lab
+        level (grouped by code + name: a name under two codes gives one row
+        per code), requesting_facility at the others. lab_code filters TestingFacilityCode. ✱5 the end day is
         included. ✱4/✱7 positive and negative read FinalResult (the legacy PoC
         route read POC_Result, the conventional route PCR_Result).
         ---
@@ -128,7 +155,7 @@ class EidTestedSamples(Resource):
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
-                description: "Rows: testing_facility or requesting_facility, total, positive, negative"
+                description: "Rows: testing_facility (with testing_facility_code at the lab level) or requesting_facility, total, positive, negative"
             400:
                 description: Invalid parameter (lab_type, category or interval_dates)
             401:
@@ -153,8 +180,8 @@ class EidTat(Resource):
         registration >= 0 days. Levels as laboratories/tested_samples/
         (facility_type, disaggregation). As in the legacy, district rows also
         carry province, and health facility rows province and district. Rows
-        carry testing_facility at the lab level, requesting_facility at the
-        others. lab_type does not apply. lab_code filters TestingFacilityCode.
+        carry testing_facility and testing_facility_code at the lab level
+        (grouped by code + name), requesting_facility at the others. lab_type does not apply. lab_code filters TestingFacilityCode.
         ✱5 the end day is included.
         ---
         tags:
@@ -174,7 +201,7 @@ class EidTat(Resource):
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
-                description: "Rows: [province, district,] testing_facility or requesting_facility, collection_hub_reception, hub_reception_hub_registration, hub_registration_lab_reception, lab_reception_lab_registration, lab_registration_analysis, analysis_validation"
+                description: "Rows: [province, district,] testing_facility (with testing_facility_code at the lab level) or requesting_facility, collection_hub_reception, hub_reception_hub_registration, hub_registration_lab_reception, lab_reception_lab_registration, lab_registration_analysis, analysis_validation"
             400:
                 description: Invalid parameter (lab_type, category or interval_dates)
             401:
@@ -211,7 +238,7 @@ class EidTatSamples(Resource):
             - $ref: '#/parameters/TATCategoryParameter'
         responses:
             200:
-                description: "Rows: testing_facility, category, lt_7, between_7_15, between_16_21, gt_21, no_dates"
+                description: "Rows: testing_facility, testing_facility_code, category, lt_7, between_7_15, between_16_21, gt_21, no_dates"
             400:
                 description: Invalid parameter (lab_type, category or interval_dates)
             401:
@@ -246,7 +273,7 @@ class EidRejectedSamples(Resource):
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
-                description: "Rows: receiving_facility, repeat_test, insufficient_sample, request_without_sample, technical_problems, overlapping_blood, duplicate_registration, misidentified_sample, sample_over_30_days, other, total"
+                description: "Rows: receiving_facility, receiving_facility_code, repeat_test, insufficient_sample, request_without_sample, technical_problems, overlapping_blood, duplicate_registration, misidentified_sample, sample_over_30_days, other, total"
             400:
                 description: Invalid parameter (lab_type, category or interval_dates)
             401:
@@ -314,7 +341,7 @@ class EidSamplesByEquipment(Resource):
             - $ref: '#/parameters/LabCodeParameter'
         responses:
             200:
-                description: "Rows: testing_facility, tested, CAPCTM, ALINITY, M2000, C6800, PANTHER, MPIMA, MANUAL"
+                description: "Rows: testing_facility, testing_facility_code, tested, CAPCTM, ALINITY, M2000, C6800, PANTHER, MPIMA, MANUAL"
             400:
                 description: Invalid parameter (lab_type, category or interval_dates)
             401:

@@ -1,5 +1,6 @@
 from hiv.eid.controllers.eid_controller_transport import EidTransportTatByLocation, EidTransportTatByWeek
 from hiv.eid.controllers.eid_controller_laboratory import (
+    EidLaboratoryLabs,
     EidTestedSamplesByMonth,
     EidRegisteredSamplesByMonth,
     EidTestedSamples,
@@ -55,6 +56,7 @@ def eid_routes(api):
 
     # Laboratory Endpoints
     # Legacy: GET /eid/lab/all/samples_tested_by_month + /eid/lab/conventional/samples_tested_by_month + /eid/lab/poc/samples_tested_by_month
+    api.add_resource(EidLaboratoryLabs, "/hiv/eid/laboratories/labs/")
     api.add_resource(EidTestedSamplesByMonth, "/hiv/eid/laboratories/tested_samples_by_month/")
     # Legacy: GET /eid/lab/all/samples_registered_by_month
     api.add_resource(EidRegisteredSamplesByMonth, "/hiv/eid/laboratories/registered_samples_by_month/")
