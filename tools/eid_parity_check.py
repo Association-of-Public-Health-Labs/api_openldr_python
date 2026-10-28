@@ -34,6 +34,7 @@ from datetime import date, timedelta
 import requests
 
 from tools.vl_parity_check import (
+    _key_value,
     compare,
     default_windows,
     http_fetch,
@@ -51,8 +52,8 @@ ALL = "all fields"
 Check = namedtuple(
     "Check",
     "legacy_path python_path python_params legacy_keys python_keys fields "
-    "legacy_params legacy_aggregate stars legacy_derive legacy_extra_paths legacy_lab_type_param",
-    defaults=(None, False, None, None, (), None),
+    "legacy_params legacy_aggregate stars legacy_derive legacy_extra_paths legacy_lab_type_param python_rows",
+    defaults=(None, False, None, None, (), None, None),
 )
 Check.__doc__ = """One legacy route compared with one Python route.
 
@@ -65,6 +66,9 @@ legacy routes whose rows are added to legacy_path's (with legacy_aggregate, summ
 legacy_lab_type_param: the legacy query parameter that carries ``lab_type`` (the /lab/all/*
 routes take ``labType``); without it ``lab_type`` must be the legacy route variant (a
 conventional/poc path segment).
+python_rows: how to read Python rows sharing a key (lab rows split by lab code when one name has
+two codes): "sum" adds them per key (counts); "unique" keeps none silently, a repeated key is
+reported as a ``DUPLICATE NAME`` line and the check is a DIFF (averages cannot be added).
 """
 
 STARS = {
@@ -154,7 +158,8 @@ CHECKS = [
           [("Tested", "tested"), *EQUIPMENT], stars=EQUIPMENT_STAR),
     # Laboratório
     Check("/lab/conventional/samples_tested", f"{L}/tested_samples/", {"lab_type": "conventional"},
-          *TESTING_LAB, [("Total", "total"), ("Positivity", "positive")]),
+          *TESTING_LAB, [("Total", "total"), ("Positivity", "positive")],
+          python_rows="sum"),
     # The legacy PoC card opens per province (ruling R18): Python lab_type=poc&facility_type=province.
     Check("/lab/poc/samples_tested", f"{L}/tested_samples/", {"lab_type": "poc", "facility_type": "province"},
           ["RequestingProvinceName"], ["requesting_facility"], [("Total", "total"), ("Positivity", "positive")],
@@ -162,18 +167,20 @@ CHECKS = [
     *[Check("/lab/all/samples_tested_by_month", f"{L}/tested_samples_by_month/", params, *MONTH,
             [("Total", "total"), ("Positivity", "positive")], legacy_lab_type_param="labType")
       for params in ({}, {"lab_type": "conventional"}, {"lab_type": "poc"})],
-    Check("/lab/tat_samples", f"{L}/tat_samples/", {"category": "0"}, *TESTING_LAB, BRACKETS),
-    Check("/lab/conventional/tat", f"{L}/tat/", {}, *TESTING_LAB, TAT),
+    Check("/lab/tat_samples", f"{L}/tat_samples/", {"category": "0"}, *TESTING_LAB, BRACKETS,
+          python_rows="sum"),
+    Check("/lab/conventional/tat", f"{L}/tat/", {}, *TESTING_LAB, TAT, python_rows="unique"),
     *[Check("/lab/all/samples_registered_by_month", f"{L}/registered_samples_by_month/", params, *MONTH,
             REGISTERED, legacy_lab_type_param="labType")
       for params in ({}, {"lab_type": "conventional"}, {"lab_type": "poc"})],
     Check("/lab/samples_by_equipment_monthly", f"{L}/samples_by_equipment_by_month/", {}, *MONTH,
           [("Tested", "tested"), *EQUIPMENT], stars=EQUIPMENT_STAR),
     Check("/lab/samples_by_equipment", f"{L}/samples_by_equipment/", {}, *TESTING_LAB,
-          [("Tested", "tested"), *EQUIPMENT], stars=EQUIPMENT_STAR),
+          [("Tested", "tested"), *EQUIPMENT], stars=EQUIPMENT_STAR,
+          python_rows="sum"),
     Check("/lab/rejected_samples_monthly", f"{L}/rejected_samples_by_month/", {}, *MONTH, REJECTION),
     Check("/lab/rejected_samples", f"{L}/rejected_samples/", {},
-          ["ReceivingFacilityName"], ["receiving_facility"], REJECTION),
+          ["ReceivingFacilityName"], ["receiving_facility"], REJECTION, python_rows="sum"),
     # Província/Distrito/US
     Check("/clinic/samples_registered_province", f"{F}/registered_samples/", PY_FACILITY, *FACILITY,
           [("Conventional", "conventional"), ("Poc", "poc"), ("total", "total")]),
@@ -406,17 +413,30 @@ def run_check(check, window, fetch, legacy_base, python_base, headers, lab_names
 
     legacy_index = index_rows(legacy_rows, check.legacy_keys, [f for f, _ in check.fields],
                               aggregate=check.legacy_aggregate)
-    python_index = index_rows(python_rows, check.python_keys, [f for _, f in check.fields])
+    python_index = index_rows(python_rows, check.python_keys, [f for _, f in check.fields],
+                              aggregate=check.python_rows == "sum")
     # A row only one side has is never explained by a ✱.
     missing = compare(legacy_index, python_index, [], labels=LABELS)
+    if check.python_rows == "unique":
+        missing += _duplicate_names(python_rows, check.python_keys)
     summaries = field_summaries(check, legacy_index, python_index)
     details = compare(legacy_index, python_index, check.fields, labels=LABELS)
-    if not details:
+    if not details and not missing:
         return "OK", []
-    lines = [line for _, line in summaries] + details
+    lines = [line for _, line in summaries] + details + [m for m in missing if m not in details]
     if missing or not all(expected for expected, _ in summaries):
         return "DIFF", lines
     return "EXPECTED ✱", lines
+
+
+def _duplicate_names(rows, key_fields):
+    """``DUPLICATE NAME`` lines for Python rows sharing a key (a name under two lab codes)."""
+    counts = {}
+    for row in rows:
+        key = tuple(_key_value(field, row.get(field)) for field in key_fields)
+        counts[key] = counts.get(key, 0) + 1
+    return [f"{key} DUPLICATE NAME: {n} python rows share it (one name, several codes)"
+            for key, n in sorted(counts.items(), key=repr) if n > 1]
 
 
 # --------------------------------------------------------------------------- main
