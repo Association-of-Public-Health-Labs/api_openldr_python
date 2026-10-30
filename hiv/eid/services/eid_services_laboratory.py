@@ -17,6 +17,12 @@ are the spec's ✱ fixes only (docs/superpowers/specs/
   C6800, M200C -> M2000, PNTHC -> PANTHER, ALNTB -> ALINITY), compared
   trimmed; equipment counts are expected to be higher than the legacy.
 
+Lab-level rows also carry the lab code (plan 2c, L2): ``testing_facility_code``
+on tested_samples, tat, tat_samples and samples_by_equipment,
+``receiving_facility_code`` on rejected_samples. They group by code + name, so
+a name used under two codes gives one row per code. Existing keys and the
+order by name are unchanged.
+
 ``lab_code`` filters ``TestingFacilityCode`` (the legacy filtered the lab
 name), except on the routes that group by the receiving lab (registered and
 rejected), where it filters ``ReceivingFacilityCode``. The legacy lab routes
@@ -133,6 +139,39 @@ def _group_key(level):
 
 
 # ---------------------------------------------------------------------------
+# 0. laboratories/labs/   (new, plan 2c L1)
+# ---------------------------------------------------------------------------
+def laboratory_labs_service(req_args):
+    """The EID labs and PoC sites with a testing lab code: code, name, lab_type.
+
+    Distinct ``TestingFacilityCode`` / ``TestingFacilityName`` with a code,
+    per lab type: ``conventional`` (the conventional rule) and ``poc`` (the
+    PoC rule). A code seen under both appears once per type. Sorted by name,
+    then lab type. No date window, no other filter.
+    """
+    parse_eid_params(req_args)
+    code, name = EIDMaster.TestingFacilityCode, EIDMaster.TestingFacilityName
+    try:
+        labs = []
+        for lab_type, condition in (
+            ("conventional", conventional_condition()),
+            ("poc", poc_condition()),
+        ):
+            rows = (
+                EIDMaster.query.with_entities(code.label("code"), name.label("name"))
+                .filter(and_(code.is_not(None), name.is_not(None), condition))
+                .distinct()
+                .order_by(name, code)
+                .all()
+            )
+            labs += [dict(code=row.code, name=row.name, lab_type=lab_type) for row in rows]
+        # Stable sort: conventional stays before poc within a name.
+        return sorted(labs, key=lambda lab: (lab["name"], lab["code"]))
+    except Exception as e:
+        return _error(e)
+
+
+# ---------------------------------------------------------------------------
 # 1. laboratories/tested_samples_by_month/   (lab/all/samples_tested_by_month)
 # ---------------------------------------------------------------------------
 def tested_samples_by_month_service(req_args):
@@ -228,8 +267,10 @@ def tested_samples_service(req_args):
     district -> health_facility). The legacy drill (facilityType = the
     clicked level, facilityCodes = its name) maps to ``facility_type`` = the
     clicked level, its name in ``lab_code`` / ``province`` / ``district``,
-    and ``disaggregation=true``. Rows carry ``testing_facility`` at the lab
-    level, ``requesting_facility`` at the other levels. ✱4/✱7 results read
+    and ``disaggregation=true``. Rows carry ``testing_facility`` (and
+    ``testing_facility_code``) at the lab level, ``requesting_facility`` at
+    the other levels. The lab level groups by code + name: a name under two
+    codes gives one row per code. ✱4/✱7 results read
     FinalResult.
     """
     params = parse_eid_params(req_args)
@@ -241,22 +282,26 @@ def tested_samples_service(req_args):
         _tested_lab_type(params.lab_type),
     ]
     key = _group_key(level)
+    # Lab level only: also group by (and return) the lab code (L2).
+    code_cols = [EIDMaster.TestingFacilityCode] if level == "lab" else []
     try:
         rows = (
             EIDMaster.query.with_entities(
                 column.label(key),
+                *[col.label("testing_facility_code") for col in code_cols],
                 _total("total"),
                 result_count("positive", "positive"),
                 result_count("negative", "negative"),
             )
             .filter(and_(*filters))
-            .group_by(column)
-            .order_by(column)
+            .group_by(*code_cols, column)
+            .order_by(column, *code_cols)
             .all()
         )
         return [
-            {key: getattr(row, key), "total": row.total, "positive": row.positive,
-             "negative": row.negative}
+            {key: getattr(row, key),
+             **({"testing_facility_code": row.testing_facility_code} if code_cols else {}),
+             "total": row.total, "positive": row.positive, "negative": row.negative}
             for row in rows
         ]
     except Exception as e:
@@ -274,13 +319,15 @@ def tat_service(req_args):
     reception, ...), integer averages with 0 counted as 1. Levels as
     ``laboratories/tested_samples/``; as in the legacy, the district level
     also groups by (and returns) ``province``, and the health facility level
-    ``province`` and ``district``. ``lab_type`` does not apply (conventional
-    only).
+    ``province`` and ``district``. The lab level also returns
+    ``testing_facility_code`` (grouped by code + name). ``lab_type`` does not
+    apply (conventional only).
     """
     params = parse_eid_params(req_args)
     column, level = _lab_level(params)
     key = _group_key(level)
     parents = _TAT_PARENT_COLUMNS[level]
+    code_cols = [EIDMaster.TestingFacilityCode] if level == "lab" else []
     group_cols = [col for _, col in parents] + [column]
     filters = _base_filters(params, EIDMaster.AnalysisDateTime) + tat_filters("lab_tat")
     try:
@@ -288,14 +335,16 @@ def tat_service(req_args):
             EIDMaster.query.with_entities(
                 *[col.label(name) for name, col in parents],
                 column.label(key),
+                *[col.label("testing_facility_code") for col in code_cols],
                 *tat_averages(zero_as_one=True),
             )
             .filter(and_(*filters))
-            .group_by(*group_cols)
-            .order_by(*group_cols)
+            .group_by(*code_cols, *group_cols)
+            .order_by(*group_cols, *code_cols)
             .all()
         )
-        names = [name for name, _ in parents] + [key] + _TAT_KEYS
+        names = ([name for name, _ in parents] + [key]
+                 + (["testing_facility_code"] if code_cols else []) + _TAT_KEYS)
         return [{name: getattr(row, name) for name in names} for row in rows]
     except Exception as e:
         return _error(e)
@@ -309,7 +358,8 @@ def tat_samples_service(req_args):
 
     Legacy: AnalysisDateTime window, ``tat_filters("lab_tat_samples")``
     (IsPoc 'No', no PBC / UEM, no 90-day limit); brackets <7, 7-15, 16-21,
-    >21 and no dates.
+    >21 and no dates. Rows add ``testing_facility_code`` (grouped by code +
+    name).
     """
     params = parse_eid_params(req_args)
     filters = _base_filters(params, EIDMaster.AnalysisDateTime) + tat_filters("lab_tat_samples")
@@ -318,15 +368,17 @@ def tat_samples_service(req_args):
         rows = (
             EIDMaster.query.with_entities(
                 EIDMaster.TestingFacilityName.label("testing_facility"),
+                EIDMaster.TestingFacilityCode.label("testing_facility_code"),
                 *tat_bracket_counts(params.category),
             )
             .filter(and_(*filters))
-            .group_by(EIDMaster.TestingFacilityName)
-            .order_by(EIDMaster.TestingFacilityName)
+            .group_by(EIDMaster.TestingFacilityCode, EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName, EIDMaster.TestingFacilityCode)
             .all()
         )
         return [
-            dict(testing_facility=row.testing_facility, category=segment,
+            dict(testing_facility=row.testing_facility,
+                 testing_facility_code=row.testing_facility_code, category=segment,
                  **{key: getattr(row, key) for key in _BRACKET_KEYS})
             for row in rows
         ]
@@ -351,23 +403,26 @@ def rejected_samples_service(req_args):
     ReceivingFacilityName; reasons of the default variant (REJOL and PRTLA
     count as ``other``). ``total`` counts every rejected row (code or
     description); a row rejected by description only is in no reason.
-    ✱2 ``lab_code`` applies, on ``ReceivingFacilityCode``.
+    ✱2 ``lab_code`` applies, on ``ReceivingFacilityCode``. Rows add
+    ``receiving_facility_code`` (grouped by code + name).
     """
     params = parse_eid_params(req_args)
     try:
         rows = (
             EIDMaster.query.with_entities(
                 EIDMaster.ReceivingFacilityName.label("receiving_facility"),
+                EIDMaster.ReceivingFacilityCode.label("receiving_facility_code"),
                 *rejection_reason_counts("default"),
                 _total("total"),
             )
             .filter(and_(*_rejected_filters(params)))
-            .group_by(EIDMaster.ReceivingFacilityName)
-            .order_by(EIDMaster.ReceivingFacilityName)
+            .group_by(EIDMaster.ReceivingFacilityCode, EIDMaster.ReceivingFacilityName)
+            .order_by(EIDMaster.ReceivingFacilityName, EIDMaster.ReceivingFacilityCode)
             .all()
         )
         return [
             dict(receiving_facility=row.receiving_facility,
+                 receiving_facility_code=row.receiving_facility_code,
                  **{key: getattr(row, key) for key in _REJECTION_KEYS}, total=row.total)
             for row in rows
         ]
@@ -408,7 +463,8 @@ def samples_by_equipment_service(req_args):
 
     Legacy: AnalysisDateTime window, ``HL7ResultStatusCode = 'F'``,
     ``IsPoc = 'No'``, ``TestingFacilityCode <> 'PBC'``, grouped by
-    TestingFacilityName.
+    TestingFacilityName. Rows add ``testing_facility_code`` (grouped by code +
+    name).
     """
     params = parse_eid_params(req_args)
     filters = _base_filters(params, EIDMaster.AnalysisDateTime)
@@ -416,15 +472,18 @@ def samples_by_equipment_service(req_args):
     try:
         rows = (
             EIDMaster.query.with_entities(
-                EIDMaster.TestingFacilityName.label("testing_facility"), *equipment_counts()
+                EIDMaster.TestingFacilityName.label("testing_facility"),
+                EIDMaster.TestingFacilityCode.label("testing_facility_code"),
+                *equipment_counts(),
             )
             .filter(and_(*filters))
-            .group_by(EIDMaster.TestingFacilityName)
-            .order_by(EIDMaster.TestingFacilityName)
+            .group_by(EIDMaster.TestingFacilityCode, EIDMaster.TestingFacilityName)
+            .order_by(EIDMaster.TestingFacilityName, EIDMaster.TestingFacilityCode)
             .all()
         )
         return [
-            dict(testing_facility=row.testing_facility, tested=row.tested,
+            dict(testing_facility=row.testing_facility,
+                 testing_facility_code=row.testing_facility_code, tested=row.tested,
                  **{key: getattr(row, key) for key in _EQUIPMENT_KEYS})
             for row in rows
         ]

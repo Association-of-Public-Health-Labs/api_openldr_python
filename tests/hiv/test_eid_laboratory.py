@@ -1,5 +1,5 @@
 """
-Tests for EID Laboratory endpoints (11 routes).
+Tests for EID Laboratory endpoints (12 routes).
 Each test mocks the corresponding service function at the controller layer
 and verifies a 200 response with expected data structure.
 """
@@ -24,14 +24,20 @@ EID_LAB_ENDPOINTS = [
           "conventional": 200, "poc": 20}],
     ),
     (
+        "/hiv/eid/laboratories/labs/",
+        "laboratory_labs_service",
+        [{"code": "PJV", "name": "Lab A", "lab_type": "conventional"}],
+    ),
+    (
         "/hiv/eid/laboratories/tested_samples/",
         "tested_samples_service",
-        [{"testing_facility": "Lab A", "total": 200, "positive": 15, "negative": 165}],
+        [{"testing_facility": "Lab A", "testing_facility_code": "PJV", "total": 200,
+          "positive": 15, "negative": 165}],
     ),
     (
         "/hiv/eid/laboratories/tat/",
         "tat_service",
-        [{"testing_facility": "Lab A",
+        [{"testing_facility": "Lab A", "testing_facility_code": "PJV",
           "collection_hub_reception": 1, "hub_reception_hub_registration": 1,
           "hub_registration_lab_reception": 2, "lab_reception_lab_registration": 1,
           "lab_registration_analysis": 1, "analysis_validation": 1}],
@@ -39,13 +45,14 @@ EID_LAB_ENDPOINTS = [
     (
         "/hiv/eid/laboratories/tat_samples/",
         "tat_samples_service",
-        [{"testing_facility": "Lab A", "category": "collection_hub_reception",
+        [{"testing_facility": "Lab A", "testing_facility_code": "PJV",
+          "category": "collection_hub_reception",
           "lt_7": 100, "between_7_15": 50, "between_16_21": 20, "gt_21": 10, "no_dates": 0}],
     ),
     (
         "/hiv/eid/laboratories/rejected_samples/",
         "rejected_samples_service",
-        [{"receiving_facility": "Lab A",
+        [{"receiving_facility": "Lab A", "receiving_facility_code": "PJV",
           "repeat_test": 1, "insufficient_sample": 2, "request_without_sample": 0,
           "technical_problems": 3, "overlapping_blood": 0, "duplicate_registration": 1,
           "misidentified_sample": 0, "sample_over_30_days": 2, "other": 1, "total": 10}],
@@ -61,7 +68,7 @@ EID_LAB_ENDPOINTS = [
     (
         "/hiv/eid/laboratories/samples_by_equipment/",
         "samples_by_equipment_service",
-        [{"testing_facility": "Lab A",
+        [{"testing_facility": "Lab A", "testing_facility_code": "PJV",
           "tested": 120, "CAPCTM": 50, "ALINITY": 30, "M2000": 20, "C6800": 10,
           "PANTHER": 5, "MPIMA": 3, "MANUAL": 2}],
     ),
@@ -90,7 +97,7 @@ EID_LAB_ENDPOINTS = [
 
 
 class TestEidLaboratoryEndpoints:
-    """Test all 11 EID laboratory endpoints return 200 with mocked service."""
+    """Test all 12 EID laboratory endpoints return 200 with mocked service."""
 
     @pytest.mark.parametrize("url,service_name,mock_data", EID_LAB_ENDPOINTS)
     def test_endpoint_returns_200(self, client, auth_headers, url, service_name, mock_data):
@@ -150,7 +157,7 @@ class TestEidTatResponse:
 
     def test_tat_has_expected_keys(self, client, auth_headers):
         response = _get(client, auth_headers, "/hiv/eid/laboratories/tat/", "tat_service")
-        assert set(response.get_json()[0]) == {"testing_facility", *TAT_KEYS}
+        assert set(response.get_json()[0]) == {"testing_facility", "testing_facility_code", *TAT_KEYS}
 
 
 class TestEidTatSamplesResponse:
@@ -158,7 +165,7 @@ class TestEidTatSamplesResponse:
         response = _get(client, auth_headers, "/hiv/eid/laboratories/tat_samples/?category=0",
                         "tat_samples_service")
         assert set(response.get_json()[0]) == {
-            "testing_facility", "category", "lt_7", "between_7_15", "between_16_21",
+            "testing_facility", "testing_facility_code", "category", "lt_7", "between_7_15", "between_16_21",
             "gt_21", "no_dates",
         }
 
@@ -168,7 +175,7 @@ class TestEidRejectedResponse:
         response = _get(client, auth_headers, "/hiv/eid/laboratories/rejected_samples/",
                         "rejected_samples_service")
         assert set(response.get_json()[0]) == {
-            "receiving_facility", "repeat_test", "insufficient_sample",
+            "receiving_facility", "receiving_facility_code", "repeat_test", "insufficient_sample",
             "request_without_sample", "technical_problems", "overlapping_blood",
             "duplicate_registration", "misidentified_sample", "sample_over_30_days",
             "other", "total",
@@ -206,7 +213,7 @@ def test_tat_samples_category_scale_is_zero_to_five(app, category, segment):
     from tests.hiv.sql_capture import service_sql
     from hiv.eid.services.eid_services_laboratory import tat_samples_service
 
-    row = type("Row", (), dict(testing_facility="Lab A", lt_7=1, between_7_15=0,
+    row = type("Row", (), dict(testing_facility="Lab A", testing_facility_code="PJV", lt_7=1, between_7_15=0,
                                between_16_21=0, gt_21=0, no_dates=0))()
     result, _ = service_sql(
         app, tat_samples_service,
@@ -216,3 +223,14 @@ def test_tat_samples_category_scale_is_zero_to_five(app, category, segment):
     assert isinstance(result, list), result
     assert result[0]["category"] == segment
     assert result[0]["testing_facility"] == "Lab A"
+
+
+class TestEidLabsResponse:
+    def test_labs_has_expected_keys(self, client, auth_headers):
+        response = _get(client, auth_headers, "/hiv/eid/laboratories/labs/",
+                        "laboratory_labs_service")
+        assert response.status_code == 200
+        assert set(response.get_json()[0]) == {"code", "name", "lab_type"}
+
+    def test_labs_requires_auth(self, client):
+        assert client.get("/hiv/eid/laboratories/labs/").status_code in (401, 422)
