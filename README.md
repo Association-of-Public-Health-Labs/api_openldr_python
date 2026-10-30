@@ -17,6 +17,7 @@ A RESTful API for epidemiological and laboratory reporting, with endpoints for T
 - [Common Parameters](#common-parameters)
 - [Pagination](#pagination)
 - [Authentication](#authentication)
+- [Doubts and suggestions](docs/suggestions.md)
 - [Getting Started](#getting-started)
 - [Deployment](#deployment)
 - [Environment Setup](#environment-setup)
@@ -103,10 +104,12 @@ The API currently registers the following route modules in `app.py`:
 | Authentication | `/auth/*` | `auth/routes.py` |
 | Dictionary | `/dict/*` | `dict/routes.py` |
 | TB GeneXpert | `/tb/gx/*` | `tb/gxpert/routes.py` |
+| TB Cultura | `/tb/cultura/*` | `tb/cultura/routes.py` |
 | HIV Viral Load | `/hiv/vl/*` | `hiv/vl/routes.py` |
 | HIV EID | `/hiv/eid/*` | `hiv/eid/routes.py` |
+| Doubts and suggestions | `/tb`, `/tb/gx`, `/tb/cultura`, `/hiv`, `/hiv/vl`, `/hiv/eid` + `/send-suggestion` | `suggestions/routes.py` |
 
-> Note: `tb/cultura` exists in the repository but is not currently registered in `app.py`.
+See [Doubts and suggestions](docs/suggestions.md) for the payload, authentication and SMTP configuration.
 
 ### Authentication Endpoints
 
