@@ -710,7 +710,7 @@ def get_user_token_info(token_payload):
         "user_name": token_payload.get("user_name"),
         "first_name": token_payload.get("first_name"),
         "last_name": token_payload.get("last_name"),
-        "email_address": token_payload.get("email_address"),
+        "email_address": token_payload.get("email_address") or token_payload.get("email"),
         "full_name": token_payload.get("full_name"),
     }
 

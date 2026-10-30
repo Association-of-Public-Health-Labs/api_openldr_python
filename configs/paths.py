@@ -16,7 +16,7 @@ if IS_WINDOWS:
     config.read(Path(__file__).parent / "configs.ini")
 
 
-def get_config(section, key, env_key=None, default=None):
+def get_config(section, key, env_key=None, default=None, *, raw=False):
     """
     Unified configuration getter.
 
@@ -25,7 +25,7 @@ def get_config(section, key, env_key=None, default=None):
     """
 
     if IS_WINDOWS:
-        return config.get(section, key, fallback=default)
+        return config.get(section, key, fallback=default, raw=raw)
     else:
         return os.environ.get(env_key or key.upper(), default)
 
@@ -64,7 +64,9 @@ PASSWORD = get_config("Databases", "database_password", "DB_PASSWORD")
 # ReportData may live on another server, with its own login. Blank values fall
 # back to the environment's server and DB_USER / DB_PASSWORD.
 REPORT_DATA_HOST = get_config("Databases", "report_data_host", "REPORT_DATA_HOST")
-REPORT_DATA_USER = get_config("Databases", "report_data_user", "REPORT_DATA_USER") or USERNAME
+REPORT_DATA_USER = (
+    get_config("Databases", "report_data_user", "REPORT_DATA_USER") or USERNAME
+)
 REPORT_DATA_PASSWORD = (
     get_config("Databases", "report_data_password", "REPORT_DATA_PASSWORD") or PASSWORD
 )
@@ -94,6 +96,20 @@ CLERK_PUBLIC_KEY = get_config("Clerk", "clerk_public_key", "CLERK_PUBLIC_KEY")
 CLERK_AUTHORIZED_PARTIES = get_config(
     "Clerk", "clerk_authorized_parties", "CLERK_AUTHORIZED_PARTIES"
 )
+
+
+# -----------------------------
+# Email / SMTP (shared doubts and suggestions)
+# -----------------------------
+SMTP_HOST = get_config("Email", "host", "SMTP_HOST", raw=True)
+SMTP_PORT = get_config("Email", "port", "SMTP_PORT", raw=True)
+SMTP_USERNAME = get_config("Email", "username", "SMTP_USERNAME", raw=True)
+# Raw reads preserve literal '%' characters in SMTP credentials.
+SMTP_PASSWORD = get_config("Email", "password", "SMTP_PASSWORD", raw=True)
+SMTP_FROM_ADDRESS = get_config("Email", "from_address", "SMTP_FROM_ADDRESS", raw=True)
+SMTP_USE_TLS = get_config("Email", "use_tls", "SMTP_USE_TLS", raw=True)
+SMTP_USE_SSL = get_config("Email", "use_ssl", "SMTP_USE_SSL", "false", raw=True)
+SMTP_TIMEOUT = get_config("Email", "timeout", "SMTP_TIMEOUT", "15", raw=True)
 
 
 # -----------------------------
@@ -158,7 +174,10 @@ SQLALCHEMY_BINDS_APHL_OPENLDR_ORG_MZ = {
     "dict": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, DICT_DATABASE_DATABASE),
     "users": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, USER_DATABASE),
     "reportData": make_url(
-        REPORT_DATA_USER, REPORT_DATA_PASSWORD, REPORT_DATA_HOST or LOCAL_DOMAIN_NAME, REPORT_DATA_DATABASE
+        REPORT_DATA_USER,
+        REPORT_DATA_PASSWORD,
+        REPORT_DATA_HOST or LOCAL_DOMAIN_NAME,
+        REPORT_DATA_DATABASE,
     ),
 }
 
@@ -171,7 +190,10 @@ SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ = {
     "dict": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, DICT_DATABASE_DATABASE),
     "users": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, USER_DATABASE),
     "reportData": make_url(
-        REPORT_DATA_USER, REPORT_DATA_PASSWORD, REPORT_DATA_HOST or CDR_DOMAIN_NAME, REPORT_DATA_DATABASE
+        REPORT_DATA_USER,
+        REPORT_DATA_PASSWORD,
+        REPORT_DATA_HOST or CDR_DOMAIN_NAME,
+        REPORT_DATA_DATABASE,
     ),
 }
 
@@ -183,6 +205,9 @@ SQLALCHEMY_BINDS_CLOUD_QUEUE_OPENLDR_ORG_MZ = {
     "dict": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, DICT_DATABASE_DATABASE),
     "users": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, USER_DATABASE),
     "reportData": make_url(
-        REPORT_DATA_USER, REPORT_DATA_PASSWORD, REPORT_DATA_HOST or CLOUD_DOMAIN_NAME, REPORT_DATA_DATABASE
+        REPORT_DATA_USER,
+        REPORT_DATA_PASSWORD,
+        REPORT_DATA_HOST or CLOUD_DOMAIN_NAME,
+        REPORT_DATA_DATABASE,
     ),
 }

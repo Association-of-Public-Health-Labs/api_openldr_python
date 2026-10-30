@@ -32,3 +32,15 @@ clerk_jwts_url =
 clerk_issuer =
 clerk_public_key =
 clerk_authorized_parties =
+
+
+# Doubts and suggestions email. Parsed by configs/paths.py.
+[Email]
+host =
+port = 587
+username =
+password =
+from_address =
+use_tls = true
+use_ssl = false
+timeout = 15
