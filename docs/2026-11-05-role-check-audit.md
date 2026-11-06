@@ -14,7 +14,7 @@ from the token's `patientData` permission (`"Admin"` with it, `"User"` without),
 | `tb/gxpert/services/tb_gx_services_patients.py` `require_admin` (4 routes) | `require_admin` | patient rows | patientData |
 | `hiv/vl/services/vl_services_facilities.py` `_facility_level_forbidden` (15 routes) | Admin when `facility_type=health_facility` | aggregate | returns `None`: open to any dashboard user |
 | `tb/gxpert/services/tb_gx_services_facilities.py` (20 routes) | `facility_type == "health_facility"`: Admin gets `process_patients` rows, others 403 | patient rows | patient_access_role |
-| `tb/gxpert/services/tb_gx_services_laboratories.py` (18 routes) | same pattern; rows come from `get_patients(lab=health_facility)` | patient rows | patient_access_role |
+| `tb/gxpert/services/tb_gx_services_laboratories.py` (16 routes) | same pattern; rows come from `get_patients(lab=health_facility)` | patient rows | patient_access_role |
 | `tb/gxpert/services/tb_gx_services_summary.py` (6 places) | `"Role"` response field only | other (no gate) | field shows Admin/User by patientData |
 | `tb/cultura/services/tb_cultura_services_common.py` | `ctx["user_role"]` into the `"Role"` field only | other (no gate; no patient rows) | same |
 | `"Role"` fields in TB facilities/laboratories aggregate branches | echo of the role | other | same |
@@ -35,11 +35,17 @@ rule "a /tb/ path with `facility_type=health_facility` or a `health_facility` pa
 `facility_type`-only check would miss it. `tests/test_patient_access.py` covers it
 (`test_flag_on_tb_health_facility_param_alone_is_403_without_patient_data`).
 
-Routes returning patient rows that the rule "`/patients/` in the path, or a /tb/ path with `facility_type=health_facility`
-or a `health_facility` param" would miss: **none found.** Patient rows come from only three places:
-`*/patients/*` routes (VL, EID, TB), and the TB facilities/laboratories services in their `health_facility` branch.
-EID and VL have no patient-row route outside `/patients/`.
+Recommended rule for `is_patient_request` (A4 uses it for the patient access log):
 
-Over-matches, harmless: the rule also matches TB routes that take a `health_facility` filter but return aggregates
-(summary, cultura), and TB `/tb/gx/facilities|laboratories/` routes called with `facility_type=health_facility` plus a
-`health_facility` filter. Those are matched on purpose. VL and EID `health_facility` params must not match (aggregates).
+- `/patients/` in the path, OR
+- a path under `/tb/gx/facilities/` or `/tb/gx/laboratories/` where a truthy `health_facility` param is present, or
+  `facility_type=health_facility` with no `province` and no `district` param (the same precedence as
+  `PROCESS_COMMON_PARAMS_FACILITY`).
+
+Why not the looser rule: `facility_type=health_facility&province=X` (or `&district=X`) resolves to province or district
+and returns aggregates. TB summary and cultura take a `health_facility` filter but only return aggregates, so they must
+not match. VL and EID `health_facility` params must not match either. With a truthy `health_facility` param the
+facilities/laboratories services take the `process_patients` branch and return patient rows, whatever `facility_type` says.
+
+Routes returning patient rows outside this rule: **none found.** Patient rows come from only three places: `*/patients/*`
+routes (VL, EID, TB), and the TB facilities/laboratories services in their `health_facility` branch.
