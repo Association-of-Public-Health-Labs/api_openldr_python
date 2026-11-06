@@ -253,11 +253,14 @@ def run_reporting_endpoint(parse_fn, service_fn):
 
     response = service_result_response(result)
     if not isinstance(response, tuple):
-        # Imported here: usage.* imports utilities, so a module-level import would be circular.
-        from usage.service import is_patient_request, log_patient_access, count_rows
+        try:
+            # Imported here: usage.* imports utilities, so a module-level import would be circular.
+            from usage.service import is_patient_request, log_patient_access, count_rows
 
-        if is_patient_request(request.path, dict(request.args.lists())):
-            log_patient_access(user_id, request.path, count_rows(response))
+            if is_patient_request(request.path, dict(request.args.lists())):
+                log_patient_access(user_id, request.path, count_rows(response))
+        except Exception:
+            logger.exception("Patient access logging failed on %s", request.path)
     # Errors come back as (body, code); only a successful report is cached.
     if cache_key is not None and not isinstance(response, tuple):
         entry = report_cache.write(cache_key, response)

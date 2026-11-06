@@ -31,9 +31,10 @@ class EidPatientsByFacility(Resource):
         """
         EID patients registered in the window, optionally at one health facility
 
-        Admin only (403 otherwise). health_facility is optional, so
-        /hiv/eid/patients/by_facility/?per_page=1 is the dashboard's admin
-        probe. Patient routes are never cached. The window is on
+        Admin only (403 otherwise). health_facility is optional, so this
+        route returns real patient rows without one; the dashboard's admin probe
+        is /hiv/eid/patients/by_name/ with no name (400 after the permission
+        check). Patient routes are never cached. The window is on
         RegisteredDateTime (date_basis=analysis: AnalysisDateTime), both days included. Rows carry the caregiver's
         phone (CaregiverMobileContact) and the mother's PTV id (PtvMother):
         third-party contact details, never logged. result is FinalResult

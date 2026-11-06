@@ -69,6 +69,36 @@ def test_log_failure_still_returns_data(app, client, auth_headers, caplog):
     assert rows(app) == []
 
 
+def test_logging_helper_failure_cannot_500_a_patient_lookup(app, client, auth_headers, caplog):
+    with patch(VL_BY_NAME, return_value=[{"id": 1}]), \
+         patch("usage.service.count_rows", side_effect=RuntimeError("helper bug")):
+        response = client.get(URL, headers=auth_headers, query_string={"name": "x"})
+    assert response.status_code == 200
+    assert response.get_json() == [{"id": 1}]
+    assert any(r.levelname == "ERROR" for r in caplog.records)
+
+
+@pytest.mark.parametrize("patient_data,status", [(True, 400), (False, 403)])
+def test_eid_probe_without_a_name_checks_the_permission_and_logs_nothing(
+        app, client, patient_data, status, monkeypatch):
+    # /hiv/eid/patients/by_name/ with no name is the dashboards' access probe: 400 with patient
+    # access, 403 without, and it must never leave a patient access row.
+    from configs import paths
+    from tests.test_token_verification import ISSUER, TB_ORIGIN, make_clerk_token, make_jwks
+    from utilities import token_verification as tv
+
+    monkeypatch.setattr(paths, "CLERK_ISSUER", ISSUER)
+    monkeypatch.setattr(paths, "CLERK_AUTHORIZED_PARTIES", TB_ORIGIN)
+    monkeypatch.setattr(tv, "_clerk_jwks", tv.JwksCache(make_jwks))
+    monkeypatch.setitem(app.config, "PERMISSIONS_ENFORCED", True)
+    claim = {"dashboards": ["vl", "eid", "tb"], "patientData": patient_data}
+    headers = {"Authorization": f"Bearer {make_clerk_token(openldr=claim)}"}
+    with patch("utilities.auth_helpers.get_user_by_id_service", return_value=None):
+        response = client.get("/hiv/eid/patients/by_name/", headers=headers)
+    assert response.status_code == status
+    assert rows(app) == []
+
+
 TB_LAB = "/tb/gx/laboratories/registered_samples/"
 TB_FAC = "/tb/gx/facilities/registered_samples/"
 
