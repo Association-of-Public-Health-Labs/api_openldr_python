@@ -49,6 +49,30 @@ def test_unmatched_admin_emails_are_reported():
     assert mp.unmatched_admins(users, {"A@x.org", "ghost@x.org"}) == ["ghost@x.org"]
 
 
+def test_secondary_address_in_admins_file_is_reported_as_unmatched():
+    user = clerk_user("u1", "a@x.org")
+    user["email_addresses"].append({"id": "idn_other", "email_address": "second@x.org"})
+    assert mp.unmatched_admins([user], {"second@x.org", "a@x.org"}) == ["second@x.org"]
+    assert plan([user], admins={"second@x.org"})[0].public_metadata["admin"] is False
+
+
+def test_malformed_users_are_those_with_dashboards_but_not_all_three_keys():
+    good = clerk_user("u1", "a@x.org", {"dashboards": ["vl"], "patientData": False, "admin": False})
+    partial = clerk_user("u2", "b@x.org", {"dashboards": ["vl"]})
+    wrong_type = clerk_user("u3", "c@x.org", {"dashboards": "vl", "patientData": False, "admin": False})
+    string_flag = clerk_user("u4", "d@x.org", {"dashboards": [], "patientData": "true", "admin": False})
+    fresh = clerk_user("u5", "e@x.org")
+    assert [u["id"] for u in mp.malformed_users([good, partial, wrong_type, string_flag, fresh])] == ["u2", "u3", "u4"]
+
+
+def test_grant_admin_keeps_other_keys_and_skips_unmigrated():
+    migrated = clerk_user("u1", "A@x.org", {"locale": "pt", "dashboards": ["vl"], "patientData": True, "admin": False})
+    fresh = clerk_user("u2", "b@x.org")
+    [change] = mp.plan_grants([migrated, fresh], {"a@x.org", "b@x.org"})
+    assert change.user_id == "u1"
+    assert change.public_metadata == {"locale": "pt", "dashboards": ["vl"], "patientData": True, "admin": True}
+
+
 def test_read_admins_file_ignores_blanks_and_comments(tmp_path):
     f = tmp_path / "admins.txt"
     f.write_text("A@x.org\n\n# note\n  b@x.org  \n")
@@ -115,3 +139,35 @@ def test_failed_write_is_reported_run_continues_exit_nonzero(capsys):
     out = capsys.readouterr()
     assert "b@x.org" in out.out + out.err
     assert "sk_secret" not in out.out + out.err
+
+
+def test_dry_run_lists_who_gets_admin_and_patient_data(capsys):
+    http = FakeHttp([clerk_user("u1", "boss@x.org"), clerk_user("u2", "b@x.org"), clerk_user("u3", "c@x.org")])
+    assert run(http, apply=False, roles={"u2": "Admin"}, admins={"boss@x.org"}) == 0
+    out = capsys.readouterr().out
+    assert "admin: boss@x.org" in out
+    assert "patientData: b@x.org" in out
+    assert "sk_secret" not in out
+
+
+def test_malformed_users_are_warned_and_never_written(capsys):
+    http = FakeHttp([clerk_user("u1", "half@x.org", {"dashboards": ["vl"]}), clerk_user("u2", "new@x.org")])
+    assert run(http, apply=True) == 0
+    assert [url.split("/")[-2] for url, _ in http.patches] == ["u2"]
+    assert "half@x.org" in capsys.readouterr().out
+
+
+def test_grant_admin_writes_only_that_user_with_other_keys_untouched():
+    migrated = clerk_user("u1", "a@x.org", {"dashboards": ["tb"], "patientData": True, "admin": False})
+    other = clerk_user("u2", "b@x.org", {"dashboards": ["tb"], "patientData": False, "admin": False})
+    http = FakeHttp([migrated, other])
+    assert mp.run(http, "https://clerk.test/v1", "sk_secret", {}, set(), True, page_size=5, grant_emails=["a@x.org"]) == 0
+    [(url, body)] = http.patches
+    assert url.endswith("/users/u1/metadata")
+    assert body == {"public_metadata": {"dashboards": ["tb"], "patientData": True, "admin": True}}
+
+
+def test_grant_admin_needs_apply(capsys):
+    import pytest
+    with pytest.raises(SystemExit):
+        mp.main(["--admins", "x.txt", "--grant-admin", "a@x.org"])

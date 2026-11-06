@@ -4,12 +4,18 @@ PERMISSIONS_ENFORCED is switched on.
 
     python -m tools.migrate_permissions --admins admins.txt            # dry run: prints a summary
     python -m tools.migrate_permissions --admins admins.txt --apply    # writes to Clerk
+    python -m tools.migrate_permissions --admins admins.txt --apply --grant-admin a@x.org   # repair: admin on
+
+``--grant-admin EMAIL`` (repeatable, needs --apply) sets ``admin`` true on an already-migrated user and
+leaves every other key alone, so a wrong admins file can be repaired.
 
 Every user gets all dashboards (vl, eid, tb). ``patientData`` is true when the user's role in
 ``openldr_api_user_users`` (matched on user_id = Clerk user id) is exactly ``Admin``. ``admin`` is true
 only for the emails in the --admins file (one per line, case-insensitive). Other publicMetadata keys
 are kept. Users who already have ``dashboards`` are skipped, so re-running never undoes changes made
-in the admin dashboard.
+in the admin dashboard. Users whose ``dashboards`` key is present but whose three keys are not all
+well-formed are listed as warnings and never overwritten (the apps' strict parser locks them out;
+fix them by hand).
 
 Uses CLERK_API_URL and CLERK_SECRET_KEY and the API's configured users database. Prints counts and
 emails only. Exit code 1 when any write failed.
@@ -56,11 +62,37 @@ def plan_changes(clerk_users, db_roles, admin_emails):
     return changes
 
 
+def malformed_users(clerk_users):
+    """Users with ``dashboards`` set but not all three keys well-formed (list, bool, bool); they are skipped."""
+    bad = []
+    for user in clerk_users:
+        meta = user.get("public_metadata") or {}
+        if "dashboards" not in meta:
+            continue
+        if not (isinstance(meta["dashboards"], list) and isinstance(meta.get("patientData"), bool) and isinstance(meta.get("admin"), bool)):
+            bad.append(user)
+    return bad
+
+
+def plan_grants(clerk_users, grant_emails):
+    """Changes that set ``admin`` true, keeping other keys, for migrated users matched by primary email. Pure."""
+    wanted = {e.strip().lower() for e in grant_emails}
+    changes = []
+    for user in clerk_users:
+        email = primary_email(user)
+        if not email or email.lower() not in wanted:
+            continue
+        metadata = dict(user.get("public_metadata") or {})
+        if "dashboards" not in metadata:
+            continue  # not migrated yet: the normal run handles it
+        metadata["admin"] = True
+        changes.append(Change(user["id"], email, metadata))
+    return changes
+
+
 def unmatched_admins(clerk_users, admin_emails):
     """Admin emails (as listed) that match no Clerk user, sorted."""
     known = {e.lower() for e in (primary_email(u) for u in clerk_users) if e}
-    for user in clerk_users:
-        known.update(a["email_address"].lower() for a in user.get("email_addresses") or [] if a.get("email_address"))
     return sorted(e for e in admin_emails if e.strip().lower() not in known)
 
 
@@ -86,7 +118,7 @@ def fetch_all_users(http, api_url, secret_key, page_size=PAGE_SIZE):
         offset += page_size
 
 
-def run(http, api_url, secret_key, db_roles, admin_emails, apply, page_size=PAGE_SIZE):
+def run(http, api_url, secret_key, db_roles, admin_emails, apply, page_size=PAGE_SIZE, grant_emails=()):
     """Plan (and with ``apply`` write) the changes; returns the process exit code."""
     users = fetch_all_users(http, api_url, secret_key, page_size=page_size)
     changes = plan_changes(users, db_roles, admin_emails)
@@ -96,6 +128,17 @@ def run(http, api_url, secret_key, db_roles, admin_emails, apply, page_size=PAGE
     print(f"  patientData: {sum(c.public_metadata['patientData'] for c in changes)}; admin: {sum(c.public_metadata['admin'] for c in changes)}")
     for email in missing:
         print(f"WARNING admin email matches no Clerk user: {email}")
+    for user in malformed_users(users):
+        print(f"WARNING skipped, partial or malformed permissions (fix by hand): {primary_email(user) or user['id']}")
+    print(f"  admin: {', '.join(sorted(c.email for c in changes if c.public_metadata['admin'] and c.email)) or '-'}")
+    print(f"  patientData: {', '.join(sorted(c.email for c in changes if c.public_metadata['patientData'] and c.email)) or '-'}")
+
+    grants = plan_grants(users, grant_emails)
+    for email in sorted({e.strip().lower() for e in grant_emails} - {(c.email or "").lower() for c in grants}):
+        print(f"WARNING --grant-admin email matches no migrated Clerk user: {email}")
+    if grants:
+        print(f"  grant admin: {', '.join(sorted(c.email for c in grants))}")
+    changes = changes + grants
 
     if not apply:
         print("Dry run: nothing was written. Re-run with --apply to write.")
@@ -132,7 +175,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--admins", required=True, help="file with one admin email per line")
     parser.add_argument("--apply", action="store_true", help="write to Clerk (default: dry run)")
+    parser.add_argument("--grant-admin", action="append", default=[], metavar="EMAIL",
+                        help="set admin true on an already-migrated user (repeatable, needs --apply)")
     args = parser.parse_args(argv)
+    if args.grant_admin and not args.apply:
+        parser.error("--grant-admin needs --apply")
 
     import requests
 
@@ -141,7 +188,7 @@ def main(argv=None):
     if not CLERK_API_URL or not CLERK_SECRET_KEY:
         print("CLERK_API_URL and CLERK_SECRET_KEY must be set.", file=sys.stderr)
         return 2
-    return run(requests, CLERK_API_URL.rstrip("/"), CLERK_SECRET_KEY, load_db_roles(), read_admins(args.admins), args.apply)
+    return run(requests, CLERK_API_URL.rstrip("/"), CLERK_SECRET_KEY, load_db_roles(), read_admins(args.admins), args.apply, grant_emails=args.grant_admin)
 
 
 if __name__ == "__main__":
