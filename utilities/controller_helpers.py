@@ -31,13 +31,19 @@ Usage example::
             )
 """
 
-from flask import current_app, request, session
+from flask import current_app, g, request, session
 from flask_restful import reqparse
 from werkzeug.exceptions import HTTPException
 
 import logging
 
 from utilities import report_cache
+from utilities.permissions import (
+    dashboard_for_path,
+    forbidden_response,
+    permissions_enforced,
+    permissions_for_token,
+)
 from utilities.service_helpers import InvalidParameter
 from utilities.token_verification import TokenVerificationError, verify_bearer_token
 from utilities.utils import get_token, get_user_token_info
@@ -150,6 +156,12 @@ def authenticate_request():
     except TokenVerificationError as exc:
         logger.warning("Rejected token on %s: %r", request.path, str(exc))
         return None, unauthorized_response()
+
+    g.permissions = permissions_for_token(token_payload)
+    if permissions_enforced():
+        dashboard = dashboard_for_path(request.path)
+        if dashboard is not None and dashboard not in g.permissions.dashboards:
+            return None, forbidden_response()
 
     session["user_info"] = get_user_token_info(token_payload)
     user_id = str(session["user_info"].get("user_id"))
