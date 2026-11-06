@@ -94,6 +94,11 @@ def by_dashboard(period):
     return rows
 
 
+def _utc(moment):
+    """Stored times are naive UTC; the Z tells browsers so, instead of reading them as local time."""
+    return moment.isoformat() + "Z"
+
+
 def top_users(period, limit, dashboard=None):
     events = _events(period, dashboard)
     sessions = defaultdict(int)
@@ -106,7 +111,7 @@ def top_users(period, limit, dashboard=None):
         last_visit[e.user_id] = max(last_visit.get(e.user_id, e.occurred_at), e.occurred_at)
     rows = [
         {"user_id": user, "dashboards": sorted(dashboards[user]), "sessions": count,
-         "last_visit": last_visit[user].isoformat()}
+         "last_visit": _utc(last_visit[user])}
         for user, count in sessions.items()
     ]
     rows.sort(key=lambda r: (-r["sessions"], r["user_id"]))
@@ -133,6 +138,6 @@ def patient_access(period, dashboard=None):
         entry[0] += 1
         entry[1] = max(entry[1], row.occurred_at) if entry[1] else row.occurred_at
     return [
-        {"user_id": user, "dashboard": name, "accesses": count, "last_access": last.isoformat()}
+        {"user_id": user, "dashboard": name, "accesses": count, "last_access": _utc(last)}
         for (user, name), (count, last) in sorted(counts.items())
     ]

@@ -110,8 +110,8 @@ def test_top_users_and_limit(app, client):
     seed(app, EVENTS)
     rows = get(client, "top_users").get_json()
     assert rows == [
-        {"user_id": "a", "dashboards": ["tb", "vl"], "sessions": 3, "last_visit": "2026-11-03T09:00:00"},
-        {"user_id": "b", "dashboards": ["eid", "vl"], "sessions": 2, "last_visit": "2026-11-30T23:59:00"},
+        {"user_id": "a", "dashboards": ["tb", "vl"], "sessions": 3, "last_visit": "2026-11-03T09:00:00Z"},
+        {"user_id": "b", "dashboards": ["eid", "vl"], "sessions": 2, "last_visit": "2026-11-30T23:59:00Z"},
     ]
     assert [r["user_id"] for r in get(client, "top_users", f"interval_dates={RANGE}&limit=1").get_json()] == ["a"]
 
@@ -135,9 +135,9 @@ def test_patient_access(app, client):
     ])
     rows = get(client, "patient_access").get_json()
     assert rows == [
-        {"user_id": "a", "dashboard": "tb", "accesses": 1, "last_access": "2026-11-03T09:00:00"},
-        {"user_id": "a", "dashboard": "vl", "accesses": 2, "last_access": "2026-11-04T09:00:00"},
-        {"user_id": "b", "dashboard": "vl", "accesses": 1, "last_access": "2026-11-30T23:30:00"},
+        {"user_id": "a", "dashboard": "tb", "accesses": 1, "last_access": "2026-11-03T09:00:00Z"},
+        {"user_id": "a", "dashboard": "vl", "accesses": 2, "last_access": "2026-11-04T09:00:00Z"},
+        {"user_id": "b", "dashboard": "vl", "accesses": 1, "last_access": "2026-11-30T23:30:00Z"},
     ]
     only_tb = get(client, "patient_access", f"interval_dates={RANGE}&dashboard=tb").get_json()
     assert [r["dashboard"] for r in only_tb] == ["tb"]
