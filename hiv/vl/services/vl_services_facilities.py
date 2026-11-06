@@ -28,6 +28,7 @@ from hiv.vl.services.vl_common import (
     year_month_columns,
 )
 from utilities.auth_helpers import check_admin_access, get_user_role as _get_user_role
+from utilities.permissions import permissions_enforced
 from utilities.utils import GENDER_SUPPRESSION, TOTAL_ALL, TOTAL_NOT_NULL, TOTAL_NULL
 
 
@@ -36,8 +37,8 @@ def _error(e):
 
 
 def _facility_level_forbidden(req_args, params):
-    """Single-facility aggregates (facility_type=health_facility) are Admin-only."""
-    if params.facility_type != "health_facility":
+    """Single-facility aggregates (facility_type=health_facility) are Admin-only unless permissions are enforced."""
+    if permissions_enforced() or params.facility_type != "health_facility":
         return None
     user_id, user_role = _get_user_role(req_args)
     return check_admin_access(user_id, user_role)

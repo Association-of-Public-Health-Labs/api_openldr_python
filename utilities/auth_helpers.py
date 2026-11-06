@@ -7,6 +7,7 @@ multiple service modules (``hiv/vl/services/*`` and
 """
 
 from auth.auth_service import get_user_by_id_service
+from utilities.permissions import patient_access_role, permissions_enforced
 
 
 def get_user_role(req_args):
@@ -16,8 +17,12 @@ def get_user_role(req_args):
     ``user_role`` defaults to ``"Unknown"`` when the user cannot be
     resolved (no ``user_id`` in ``req_args`` or the DB lookup fails).
     This mirrors the original behaviour of the inline implementations.
+    With PERMISSIONS_ENFORCED on, the role comes from the token's ``patientData``
+    permission and the DB is not consulted.
     """
     user_id = req_args.get("user_id")
+    if permissions_enforced():
+        return user_id, patient_access_role(None)
     if user_id is None:
         return None, "Unknown"
 
@@ -26,7 +31,7 @@ def get_user_role(req_args):
     except Exception:
         return user_id, "Unknown"
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
     return user_id, user_role
 
 

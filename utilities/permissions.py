@@ -82,3 +82,15 @@ def current_permissions():
 
 def forbidden_response():
     return {"status": "error", "code": 403, "message": "Forbidden"}, 403
+
+
+def patient_access_role(user):
+    """
+    The role string the patient-row checks compare with ``"Admin"``.
+
+    Flag off: the DB role, ``"Unknown"`` when there is no user. Flag on: ``"Admin"`` for a token
+    with ``patientData``, else ``"User"``; the DB user (possibly None) is ignored.
+    """
+    if permissions_enforced():
+        return "Admin" if current_permissions().patient_data else "User"
+    return user.role if user else "Unknown"

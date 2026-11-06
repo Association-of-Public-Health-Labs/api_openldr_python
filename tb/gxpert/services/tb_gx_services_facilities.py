@@ -3,6 +3,7 @@ from utilities.utils import *
 from sqlalchemy import and_, or_, func, case, literal
 from datetime import datetime
 from auth.auth_service import get_user_by_id_service
+from utilities.permissions import patient_access_role
 
 
 def registered_samples_by_facility_service(req_args):
@@ -31,7 +32,7 @@ def registered_samples_by_facility_service(req_args):
                 "message": "An Error Occurred",
                 "error": str(e),
             }
-        user_role = user.role if user else "Unknown"
+        user_role = patient_access_role(user)
     else:
         user_role = "Unknown"
 
@@ -162,7 +163,7 @@ def registered_samples_by_month_by_facility_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -339,7 +340,7 @@ def tested_samples_by_facility_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -558,7 +559,7 @@ def tested_samples_by_month_by_facility_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -781,7 +782,7 @@ def tested_samples_by_facility_disaggregated_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -1000,7 +1001,7 @@ def tested_samples_by_facility_disaggregated_by_gender_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     filters = [
         TBMaster.AnalysisDateTime.between(dates[0], dates[1]),
@@ -1169,7 +1170,7 @@ def tested_samples_by_facility_disaggregated_by_age_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -1446,7 +1447,7 @@ def tested_samples_by_sample_types_by_facility_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -1614,7 +1615,7 @@ def tested_samples_types_by_facility_disaggregated_by_age_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -1899,7 +1900,7 @@ def tested_samples_by_facility_disaggregated_by_drug_type_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -2114,7 +2115,7 @@ def tested_samples_by_facility_disaggregated_by_drug_type_by_age_service(req_arg
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     drug = req_args.get("drug")
 
@@ -2333,7 +2334,7 @@ def rejected_samples_by_facility_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Retrieve the column names based on the disaggregation and facility type
     ColumnNames = GET_COLUMN_NAME(
@@ -2477,7 +2478,7 @@ def rejected_samples_by_facility_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -2663,7 +2664,7 @@ def rejected_samples_by_facility_by_reason_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Retrieve the column names based on the disaggregation and facility type
     ColumnNames = GET_COLUMN_NAME(
@@ -2830,7 +2831,7 @@ def rejected_samples_by_facility_by_reason_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -3044,7 +3045,7 @@ def trl_samples_by_facility_by_days_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -3222,7 +3223,7 @@ def trl_samples_by_facility_by_days_tb_service(req_args):
             "Message": f"An error occurred: {str(e)}",
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -3420,7 +3421,7 @@ def trl_samples_by_facility_by_days_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -3662,7 +3663,7 @@ def trl_samples_avg_by_facility_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "facilities")
@@ -3793,7 +3794,7 @@ def trl_samples_avg_by_facility_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month")
     year = req_args.get("year")
