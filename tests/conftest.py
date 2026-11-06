@@ -45,12 +45,14 @@ def app():
     from tb.gxpert.routes import tb_gxpert_routes
     from auth.routes import authentication_routes
     from suggestions.routes import suggestion_routes
+    from usage.routes import usage_routes
 
     vl_routes(api)
     eid_routes(api)
     tb_gxpert_routes(api)
     authentication_routes(api)
     suggestion_routes(api)
+    usage_routes(api)
 
     with app.app_context():
         db.create_all()

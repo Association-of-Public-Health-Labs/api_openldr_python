@@ -12,13 +12,14 @@ from auth.routes import authentication_routes
 from hiv.eid.routes import eid_routes
 from hiv.vl.routes import vl_routes
 from tb.gxpert.routes import tb_gxpert_routes
+from usage.routes import usage_routes
 from utilities.swagger import swagger_template
 
 
 def test_swagger_spec_builds():
     app = Flask(__name__)
     api = Api(app)
-    for register in (vl_routes, eid_routes, tb_gxpert_routes, authentication_routes):
+    for register in (vl_routes, eid_routes, tb_gxpert_routes, authentication_routes, usage_routes):
         register(api)
     Swagger(app, template=swagger_template)
 
@@ -28,3 +29,4 @@ def test_swagger_spec_builds():
     paths = response.get_json()["paths"]
     assert "/hiv/vl/laboratories/rejected_samples/" in paths
     assert "/hiv/vl/summary/samples_history/" in paths
+    assert "/usage/events" in paths
