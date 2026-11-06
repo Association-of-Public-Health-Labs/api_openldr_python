@@ -249,6 +249,12 @@ def run_reporting_endpoint(parse_fn, service_fn):
         return {"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500
 
     response = service_result_response(result)
+    if not isinstance(response, tuple):
+        # Imported here: usage.* imports utilities, so a module-level import would be circular.
+        from usage.service import is_patient_request, log_patient_access, count_rows
+
+        if is_patient_request(request.path, dict(request.args.lists())):
+            log_patient_access(user_id, request.path, count_rows(response))
     # Errors come back as (body, code); only a successful report is cached.
     if cache_key is not None and not isinstance(response, tuple):
         entry = report_cache.write(cache_key, response)
