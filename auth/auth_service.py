@@ -107,9 +107,9 @@ def uses_service_login(login_username):
 
 
 def _service_login_user(login_username):
-    """The row of a listed service account, by name only; None for an unlisted name or a missing row."""
+    """The row of a listed service account (name and ``svc-NAME`` id); None for an unlisted name or a missing row."""
     if login_username in service_account_names():
-        return User.query.filter_by(user_name=login_username).first()
+        return User.query.filter_by(user_name=login_username, user_id=f"svc-{login_username}").first()
     return None
 
 

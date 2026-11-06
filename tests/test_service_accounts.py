@@ -146,6 +146,20 @@ def test_unlisted_personal_account_login_is_401_with_the_same_body(client, enfor
         assert response.get_json() == BAD_LOGIN
 
 
+def test_personal_row_with_a_listed_name_is_not_a_service_login(client, app, enforced):
+    with app.app_context():
+        User.query.filter_by(user_name="svc-dash").delete()
+        db.session.add(User(
+            user_id="personal-id", user_name="svc-dash", first_name="F", last_name="L",
+            password=bcrypt.hashpw(SECRET.encode(), bcrypt.gensalt(4)).decode(),
+            start_date=datetime.now(), updated_at=datetime.now(), role="Admin", email=None,
+        ))
+        db.session.commit()
+    response = login(client, "svc-dash", SECRET)
+    assert response.status_code == 401
+    assert response.get_json() == BAD_LOGIN
+
+
 def test_overlong_password_is_a_plain_401(client, enforced):
     response = login(client, "svc-dash", "x" * 200)
     assert response.status_code == 401
