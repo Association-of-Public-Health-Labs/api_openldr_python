@@ -1,6 +1,7 @@
 from sqlalchemy import and_, case, func, text
 
 from auth.auth_service import get_user_by_id_service
+from utilities.permissions import patient_access_role
 from tb.cultura.models.tb_cultura_model import TBCultura
 from utilities.utils import (
     DATE_PART,
@@ -54,7 +55,7 @@ def get_request_context(req_args):
     user_role = "Unknown"
     if user_id is not None:
         user = get_user_by_id_service(user_id)
-        user_role = user.role if user else "Unknown"
+        user_role = patient_access_role(user)
 
     return {
         "dates": dates,

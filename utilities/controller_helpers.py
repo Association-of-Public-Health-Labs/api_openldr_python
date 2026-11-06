@@ -31,13 +31,19 @@ Usage example::
             )
 """
 
-from flask import current_app, request, session
+from flask import current_app, g, request, session
 from flask_restful import reqparse
 from werkzeug.exceptions import HTTPException
 
 import logging
 
 from utilities import report_cache
+from utilities.permissions import (
+    dashboard_for_path,
+    forbidden_response,
+    permissions_enforced,
+    permissions_for_token,
+)
 from utilities.service_helpers import InvalidParameter
 from utilities.token_verification import TokenVerificationError, verify_bearer_token
 from utilities.utils import get_token, get_user_token_info
@@ -151,6 +157,15 @@ def authenticate_request():
         logger.warning("Rejected token on %s: %r", request.path, str(exc))
         return None, unauthorized_response()
 
+    g.permissions = permissions_for_token(token_payload)
+    if permissions_enforced():
+        # An API token (no ``iss``) is accepted only for a listed service account.
+        if not token_payload.get("iss") and not g.permissions.service:
+            return None, unauthorized_response()
+        dashboard = dashboard_for_path(request.path)
+        if dashboard is not None and dashboard not in g.permissions.dashboards:
+            return None, forbidden_response()
+
     session["user_info"] = get_user_token_info(token_payload)
     user_id = str(session["user_info"].get("user_id"))
     return user_id, None
@@ -237,6 +252,15 @@ def run_reporting_endpoint(parse_fn, service_fn):
         return {"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500
 
     response = service_result_response(result)
+    if not isinstance(response, tuple):
+        try:
+            # Imported here: usage.* imports utilities, so a module-level import would be circular.
+            from usage.service import is_patient_request, log_patient_access, count_rows
+
+            if is_patient_request(request.path, dict(request.args.lists())):
+                log_patient_access(user_id, request.path, count_rows(response))
+        except Exception:
+            logger.exception("Patient access logging failed on %s", request.path)
     # Errors come back as (body, code); only a successful report is cached.
     if cache_key is not None and not isinstance(response, tuple):
         entry = report_cache.write(cache_key, response)

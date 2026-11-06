@@ -7,9 +7,9 @@ same ViralLoadData / ReportData databases as the Python API:
     python -m tools.vl_parity_check --node http://localhost:4444 \
         --python https://dev.openldr.org.mz --token-file token.txt
 
-token.txt holds a token from POST /auth/login on the Python API (valid for
-60 minutes). A Clerk session token expires after about 60 seconds, too soon
-for a full run. The token is never printed.
+token.txt holds a token from POST /auth/login on the Python API (valid for 60 minutes), logged
+in as a service account (tools/create_service_account.py). A Clerk session token expires after
+about 60 seconds, too soon for a full run. The token is never printed.
 
 For every legacy URL the dashboard calls, the script fetches one full year and
 its last quarter from both APIs, normalises the keys and prints the

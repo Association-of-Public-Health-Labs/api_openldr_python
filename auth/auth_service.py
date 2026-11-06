@@ -1,13 +1,23 @@
 import json
+import logging
 import bcrypt
 from flask_jwt_extended import create_access_token
 from auth.user_model import User, UserLogs
 from uuid import uuid4
 from datetime import datetime, timedelta
 from db.database import db
-from flask import session
+from flask import request, session
+from utilities.permissions import permissions_enforced, service_account_names
 from configs.paths import *
 # from configs.paths_local import *
+
+
+logger = logging.getLogger(__name__)
+
+# Checked when a login names no usable account, so a miss costs the same bcrypt time as a wrong secret.
+_DUMMY_HASH = None
+
+_INVALID_CREDENTIALS = {"status": 401, "error": "Unauthorized", "message": "Invalid credentials"}
 
 
 # =============================================================================
@@ -58,20 +68,73 @@ def _build_user_data(user) -> dict:
     }
 
 
+def _generic_server_error() -> dict:
+    """Service-account login failure body: no exception text."""
+    from utilities.controller_helpers import GENERIC_SERVER_ERROR
+
+    return {"status": 500, "error": "Internal Server Error", "message": GENERIC_SERVER_ERROR}
+
+
+def _caller_context() -> dict:
+    """IP (X-Forwarded-For, else the socket peer) and user agent of the request being served."""
+    try:
+        return {
+            "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+            "user_agent": request.headers.get("User-Agent"),
+        }
+    except RuntimeError:
+        return {}
+
+
+def _secret_matches(secret, hashed) -> bool:
+    """
+    bcrypt check that never raises (bcrypt refuses secrets over 72 bytes). With no hash it still
+    spends the bcrypt time, against a dummy, and answers False.
+    """
+    global _DUMMY_HASH
+    if hashed is None and _DUMMY_HASH is None:
+        _DUMMY_HASH = _hash_password("dummy")
+    try:
+        matched = bcrypt.checkpw(secret.encode("utf-8"), (hashed or _DUMMY_HASH).encode("utf-8"))
+    except ValueError:
+        return False
+    return matched and hashed is not None
+
+
+def uses_service_login(login_username):
+    """True when the login follows the service-account rules: enforcement on, or a listed name."""
+    return permissions_enforced() or (isinstance(login_username, str) and login_username in service_account_names())
+
+
+def _service_login_user(login_username):
+    """The row of a listed service account (name and ``svc-NAME`` id); None for an unlisted name or a missing row."""
+    if login_username in service_account_names():
+        return User.query.filter_by(user_name=login_username, user_id=f"svc-{login_username}").first()
+    return None
+
+
 def login_user_service(args):
 
     login_username = args.get("username")
     login_email = args.get("email")
     login_password = args.get("password")
 
-    if login_username:
-        user_query = User.query.filter_by(user_name=login_username, user_id=login_password).first()
+    if uses_service_login(login_username):
+        # Same answer for an unlisted name, a missing row and a wrong secret.
+        user_query = _service_login_user(login_username) if isinstance(login_username, str) else None
+        if not _secret_matches(login_password, user_query.password if user_query else None):
+            return dict(_INVALID_CREDENTIALS)
+        rejected = False
     else:
-        user_query = User.query.filter_by(email=login_email, user_id=login_password).first()
+        if login_username:
+            user_query = User.query.filter_by(user_name=login_username, user_id=login_password).first()
+        else:
+            user_query = User.query.filter_by(email=login_email, user_id=login_password).first()
+        rejected = not user_query or not bcrypt.checkpw(
+            login_password.encode("utf-8"), user_query.password.encode("utf-8")
+        )
 
-    if not user_query or not bcrypt.checkpw(
-        login_password.encode("utf-8"), user_query.password.encode("utf-8")
-    ):    
+    if rejected:
         return (
             {
                 "status": 401,
@@ -109,7 +172,7 @@ def login_user_service(args):
                             "email": user_email,
                         },
                         "message": "Login successful",
-                        "context": {},
+                        "context": _caller_context(),
                     },
                 }
             )
@@ -127,6 +190,9 @@ def login_user_service(args):
             )
         except Exception as e:
             db.session.rollback()
+            if uses_service_login(login_username):
+                logger.exception("Could not issue a token for %s", user_id)
+                return _generic_server_error()
             return {"status": 500, "error": "Internal Server Error", "message": str(e)}
 
         return {
