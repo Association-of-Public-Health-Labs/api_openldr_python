@@ -1,7 +1,8 @@
+import json
 import logging
 
 from db.database import db
-from usage.models import PatientAccessLog, UsageEvent
+from usage.models import AdminAuditLog, PatientAccessLog, UsageEvent
 from utilities.permissions import dashboard_for_path
 
 logger = logging.getLogger(__name__)
@@ -75,3 +76,20 @@ def log_patient_access(user_id, path, row_count):
     except Exception:
         db.session.rollback()
         logger.error("Could not write patient access log for %s", clean_page(path), exc_info=True)
+
+
+def record_admin_action(actor_user_id, action, target_user_id, changes=None):
+    """Store one administrative change. ``changes`` is any JSON value, kept as text. Errors propagate: an audit write must not fail silently."""
+    entry = AdminAuditLog(
+        actor_user_id=actor_user_id,
+        action=action,
+        target_user_id=target_user_id,
+        changes=None if changes is None else json.dumps(changes),
+    )
+    try:
+        db.session.add(entry)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    return entry.id

@@ -94,3 +94,14 @@ def patient_access_role(user):
     if permissions_enforced():
         return "Admin" if current_permissions().patient_data else "User"
     return user.role if user else "Unknown"
+
+
+def require_admin_claim():
+    """
+    None when the caller may use the admin endpoints, else the 403 response. Checks the ``admin`` claim
+    whatever ``PERMISSIONS_ENFORCED`` says, and refuses service tokens. Call it after ``authenticate_request``.
+    """
+    permissions = current_permissions()
+    if permissions.service or not permissions.admin:
+        return forbidden_response()
+    return None

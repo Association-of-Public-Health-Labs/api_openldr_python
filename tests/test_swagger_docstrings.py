@@ -30,3 +30,6 @@ def test_swagger_spec_builds():
     assert "/hiv/vl/laboratories/rejected_samples/" in paths
     assert "/hiv/vl/summary/samples_history/" in paths
     assert "/usage/events" in paths
+    for path in ("/usage/summary/", "/usage/active_users_by_month/", "/usage/by_dashboard/", "/usage/top_users/",
+                 "/usage/top_pages/", "/usage/patient_access/", "/admin/audit"):
+        assert path in paths
