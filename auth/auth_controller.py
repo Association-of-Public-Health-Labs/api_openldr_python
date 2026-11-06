@@ -16,6 +16,7 @@ from auth.auth_service import (
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import jsonify, request
 from utilities.permissions import permissions_enforced
+from auth.auth_service import uses_service_login
 from configs.paths import *
 from configs import paths as config_paths
 from utilities.webhook_verification import (
@@ -24,6 +25,8 @@ from utilities.webhook_verification import (
 )
 
 logger = logging.getLogger(__name__)
+
+from utilities.controller_helpers import GENERIC_SERVER_ERROR
 
 WEBHOOK_UNAUTHORIZED_BODY = {
     "status": 401,
@@ -191,11 +194,14 @@ class user_controller(_RetirableResource):
 
         try:
             result = login_user_service(args)
-            if permissions_enforced() and isinstance(result, dict):
+            if uses_service_login(args.get("username")) and isinstance(result, dict):
                 # Service-account login answers with a real HTTP status.
                 return result, result.get("status", 200)
             return jsonify(result)
         except Exception as e:
+            if uses_service_login(args.get("username")):
+                logger.exception("Service-account login failed")
+                return {"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500
             return _error_response(500, "Internal Server Error", str(e))
 
     @jwt_required()

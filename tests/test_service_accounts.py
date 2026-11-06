@@ -235,10 +235,47 @@ def test_flag_on_login_is_logged_with_the_caller(client, app, enforced):
     assert login_log_context(app, "svc-svc-dash")["ip"] == "198.51.100.4"
 
 
-def test_log_failure_does_not_break_login(client, not_enforced):
-    with patch("auth.auth_service.save_user_log_service", side_effect=RuntimeError("log down")):
-        response = login(client, "alice", "alice-id")
-    assert response.status_code == 200 and response.get_json()["status"] == 200 and "token" in response.get_json()
+def test_flag_on_lookup_error_is_a_generic_500(client, enforced):
+    with patch("auth.auth_service.User") as model:
+        model.query.filter_by.side_effect = RuntimeError("DRIVERDETAIL server=x")
+        response = login(client, "svc-dash", SECRET)
+    assert response.status_code == 500
+    assert "DRIVERDETAIL" not in response.get_data(as_text=True)
+    assert response.get_json() == {"status": "error", "code": 500, "message": "An error occurred"}
+
+
+def test_flag_on_token_error_is_a_generic_500(client, enforced):
+    with patch("auth.auth_service.create_access_token", side_effect=RuntimeError("KEYDETAIL")):
+        response = login(client, "svc-dash", SECRET)
+    assert response.status_code == 500
+    assert "KEYDETAIL" not in response.get_data(as_text=True)
+    assert response.get_json()["message"] == "An error occurred"
+
+
+# --- a listed account also logs in with the flag off ------------------------------------
+
+def test_flag_off_listed_account_logs_in_with_its_secret(client, not_enforced):
+    response = login(client, "svc-dash", SECRET)
+    assert response.status_code == 200 and response.get_json()["token"]
+
+
+def test_flag_off_listed_account_wrong_secret_is_401(client, not_enforced):
+    response = login(client, "svc-dash", "svc-svc-dash")  # its user_id is not its password
+    assert response.status_code == 401 and response.get_json() == BAD_LOGIN
+
+
+def test_flag_off_listed_account_token_gets_numbers_but_not_patients_or_usage(client, not_enforced):
+    headers = service_headers(client)
+    with patch(VL_SERVICE, return_value=[]):
+        assert client.get(VL_URL, headers=headers).status_code == 200
+    assert client.get("/hiv/vl/patients/by_name/", headers=headers).status_code == 403
+    assert client.get("/usage/summary/", headers=headers,
+                      query_string={"interval_dates": "2026-11-01,2026-11-30"}).status_code == 403
+
+
+def test_flag_off_unlisted_name_follows_the_old_path(client, not_enforced):
+    assert login(client, "alice", "alice-id").get_json()["status"] == 200
+    assert login(client, "alice", "wrong").get_json() == [BAD_LOGIN]
 
 
 # --- tools/create_service_account.py ------------------------------------------------

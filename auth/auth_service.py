@@ -68,6 +68,13 @@ def _build_user_data(user) -> dict:
     }
 
 
+def _generic_server_error() -> dict:
+    """Service-account login failure body: no exception text."""
+    from utilities.controller_helpers import GENERIC_SERVER_ERROR
+
+    return {"status": 500, "error": "Internal Server Error", "message": GENERIC_SERVER_ERROR}
+
+
 def _caller_context() -> dict:
     """IP (X-Forwarded-For, else the socket peer) and user agent of the request being served."""
     try:
@@ -94,15 +101,16 @@ def _secret_matches(secret, hashed) -> bool:
     return matched and hashed is not None
 
 
-def _find_login_user(login_username, login_email, login_password):
-    """The user row a login names, or None. With enforcement on only a listed service account's row, by name."""
-    if permissions_enforced():
-        if login_username and login_username in service_account_names():
-            return User.query.filter_by(user_name=login_username).first()
-        return None
-    if login_username:
-        return User.query.filter_by(user_name=login_username, user_id=login_password).first()
-    return User.query.filter_by(email=login_email, user_id=login_password).first()
+def uses_service_login(login_username):
+    """True when the login follows the service-account rules: enforcement on, or a listed name."""
+    return permissions_enforced() or (isinstance(login_username, str) and login_username in service_account_names())
+
+
+def _service_login_user(login_username):
+    """The row of a listed service account, by name only; None for an unlisted name or a missing row."""
+    if login_username in service_account_names():
+        return User.query.filter_by(user_name=login_username).first()
+    return None
 
 
 def login_user_service(args):
@@ -111,14 +119,17 @@ def login_user_service(args):
     login_email = args.get("email")
     login_password = args.get("password")
 
-    user_query = _find_login_user(login_username, login_email, login_password)
-
-    if permissions_enforced():
-        # One answer for an unlisted name, a missing row and a wrong secret.
+    if uses_service_login(login_username):
+        # Same answer for an unlisted name, a missing row and a wrong secret.
+        user_query = _service_login_user(login_username) if isinstance(login_username, str) else None
         if not _secret_matches(login_password, user_query.password if user_query else None):
             return dict(_INVALID_CREDENTIALS)
         rejected = False
     else:
+        if login_username:
+            user_query = User.query.filter_by(user_name=login_username, user_id=login_password).first()
+        else:
+            user_query = User.query.filter_by(email=login_email, user_id=login_password).first()
         rejected = not user_query or not bcrypt.checkpw(
             login_password.encode("utf-8"), user_query.password.encode("utf-8")
         )
@@ -165,11 +176,6 @@ def login_user_service(args):
                     },
                 }
             )
-        except Exception:
-            db.session.rollback()
-            logger.warning("Could not record the login of %s", user_id, exc_info=True)
-
-        try:
             access_token = create_access_token(
                 identity= user_id,
                 additional_claims={
@@ -184,6 +190,9 @@ def login_user_service(args):
             )
         except Exception as e:
             db.session.rollback()
+            if uses_service_login(login_username):
+                logger.exception("Could not issue a token for %s", user_id)
+                return _generic_server_error()
             return {"status": 500, "error": "Internal Server Error", "message": str(e)}
 
         return {
