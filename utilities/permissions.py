@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from flask import current_app, g
 
+from configs import paths
+
 KNOWN_DASHBOARDS = frozenset({"vl", "eid", "tb"})
 
 # Path prefix (with trailing slash, so ``/hivex/`` never matches) -> dashboard id.
@@ -40,6 +42,12 @@ def permissions_enforced():
     return os.environ.get("PERMISSIONS_ENFORCED") == "1"
 
 
+def service_account_names():
+    """The user_name values listed in ``API_SERVICE_ACCOUNTS`` (comma separated); empty when unset."""
+    raw = paths.API_SERVICE_ACCOUNTS or ""
+    return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
+
 def parse_claim(claims):
     """The ``openldr`` claim as Permissions. Any malformed shape gives no permissions, never an error."""
     section = claims.get("openldr") if isinstance(claims, dict) else None
@@ -61,10 +69,16 @@ def parse_claim(claims):
 def permissions_for_token(claims):
     """
     Clerk tokens carry ``iss`` and are read through ``parse_claim``. API tokens (HS256) have no
-    ``iss`` and can't forge it without our secret; they get no permissions until Task A6.
+    ``iss`` and can't forge it without our secret: the signed ``user_name`` of a listed service
+    account gets every dashboard (no patient rows, no admin); any other API token gets nothing.
     """
-    if isinstance(claims, dict) and claims.get("iss"):
+    if not isinstance(claims, dict):
+        return NO_PERMISSIONS
+    if claims.get("iss"):
         return parse_claim(claims)
+    name = claims.get("user_name")
+    if isinstance(name, str) and name in service_account_names():
+        return Permissions(dashboards=KNOWN_DASHBOARDS, service=True)
     return NO_PERMISSIONS
 
 

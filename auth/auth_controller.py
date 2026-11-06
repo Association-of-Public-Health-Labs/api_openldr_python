@@ -15,6 +15,7 @@ from auth.auth_service import (
 )
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import jsonify, request
+from utilities.permissions import permissions_enforced
 from configs.paths import *
 from configs import paths as config_paths
 from utilities.webhook_verification import (
@@ -30,6 +31,23 @@ WEBHOOK_UNAUTHORIZED_BODY = {
     "message": "Invalid webhook signature",
 }
 # from configs.paths_local import *
+
+# With PERMISSIONS_ENFORCED on, users are managed in the admin dashboard (Clerk), not through the API.
+RETIRED_ENDPOINTS = frozenset({"auth_users", "auth_create", "auth_update", "auth_delete"})
+GONE_BODY = {
+    "status": "error",
+    "code": 410,
+    "message": "Gone: user management is no longer available through this API",
+}
+
+
+class _RetirableResource(Resource):
+    """Answers 410 on the retired /auth routes before any auth decorator runs (flag on only)."""
+
+    def dispatch_request(self, *args, **kwargs):
+        if permissions_enforced() and request.endpoint in RETIRED_ENDPOINTS:
+            return GONE_BODY, 410
+        return super().dispatch_request(*args, **kwargs)
 
 
 # =============================================================================
@@ -114,7 +132,7 @@ def _save_log_silent(log_args: dict):
 # Controllers
 # =============================================================================
 
-class user_controller(Resource):
+class user_controller(_RetirableResource):
     """
     Class to handle user login, update, and deletion.
     """
@@ -172,7 +190,11 @@ class user_controller(Resource):
             return _error_response(400, "Bad Request", "Username and password are required")
 
         try:
-            return jsonify(login_user_service(args))
+            result = login_user_service(args)
+            if permissions_enforced() and isinstance(result, dict):
+                # Service-account login answers with a real HTTP status.
+                return result, result.get("status", 200)
+            return jsonify(result)
         except Exception as e:
             return _error_response(500, "Internal Server Error", str(e))
 
@@ -260,7 +282,7 @@ class user_controller(Resource):
             return _error_response(500, "Internal Server Error", str(e))
 
 
-class user_create_controller(Resource):
+class user_create_controller(_RetirableResource):
     @jwt_required()
     def post(self):
         """

@@ -1,13 +1,23 @@
 import json
+import logging
 import bcrypt
 from flask_jwt_extended import create_access_token
 from auth.user_model import User, UserLogs
 from uuid import uuid4
 from datetime import datetime, timedelta
 from db.database import db
-from flask import session
+from flask import request, session
+from utilities.permissions import permissions_enforced, service_account_names
 from configs.paths import *
 # from configs.paths_local import *
+
+
+logger = logging.getLogger(__name__)
+
+# Checked when a login names no usable account, so a miss costs the same bcrypt time as a wrong secret.
+_DUMMY_HASH = None
+
+_INVALID_CREDENTIALS = {"status": 401, "error": "Unauthorized", "message": "Invalid credentials"}
 
 
 # =============================================================================
@@ -58,20 +68,62 @@ def _build_user_data(user) -> dict:
     }
 
 
+def _caller_context() -> dict:
+    """IP (X-Forwarded-For, else the socket peer) and user agent of the request being served."""
+    try:
+        return {
+            "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+            "user_agent": request.headers.get("User-Agent"),
+        }
+    except RuntimeError:
+        return {}
+
+
+def _secret_matches(secret, hashed) -> bool:
+    """
+    bcrypt check that never raises (bcrypt refuses secrets over 72 bytes). With no hash it still
+    spends the bcrypt time, against a dummy, and answers False.
+    """
+    global _DUMMY_HASH
+    if hashed is None and _DUMMY_HASH is None:
+        _DUMMY_HASH = _hash_password("dummy")
+    try:
+        matched = bcrypt.checkpw(secret.encode("utf-8"), (hashed or _DUMMY_HASH).encode("utf-8"))
+    except ValueError:
+        return False
+    return matched and hashed is not None
+
+
+def _find_login_user(login_username, login_email, login_password):
+    """The user row a login names, or None. With enforcement on only a listed service account's row, by name."""
+    if permissions_enforced():
+        if login_username and login_username in service_account_names():
+            return User.query.filter_by(user_name=login_username).first()
+        return None
+    if login_username:
+        return User.query.filter_by(user_name=login_username, user_id=login_password).first()
+    return User.query.filter_by(email=login_email, user_id=login_password).first()
+
+
 def login_user_service(args):
 
     login_username = args.get("username")
     login_email = args.get("email")
     login_password = args.get("password")
 
-    if login_username:
-        user_query = User.query.filter_by(user_name=login_username, user_id=login_password).first()
-    else:
-        user_query = User.query.filter_by(email=login_email, user_id=login_password).first()
+    user_query = _find_login_user(login_username, login_email, login_password)
 
-    if not user_query or not bcrypt.checkpw(
-        login_password.encode("utf-8"), user_query.password.encode("utf-8")
-    ):    
+    if permissions_enforced():
+        # One answer for an unlisted name, a missing row and a wrong secret.
+        if not _secret_matches(login_password, user_query.password if user_query else None):
+            return dict(_INVALID_CREDENTIALS)
+        rejected = False
+    else:
+        rejected = not user_query or not bcrypt.checkpw(
+            login_password.encode("utf-8"), user_query.password.encode("utf-8")
+        )
+
+    if rejected:
         return (
             {
                 "status": 401,
@@ -109,10 +161,15 @@ def login_user_service(args):
                             "email": user_email,
                         },
                         "message": "Login successful",
-                        "context": {},
+                        "context": _caller_context(),
                     },
                 }
             )
+        except Exception:
+            db.session.rollback()
+            logger.warning("Could not record the login of %s", user_id, exc_info=True)
+
+        try:
             access_token = create_access_token(
                 identity= user_id,
                 additional_claims={

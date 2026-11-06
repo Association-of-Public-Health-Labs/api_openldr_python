@@ -99,6 +99,13 @@ CLERK_AUTHORIZED_PARTIES = get_config(
 
 
 # -----------------------------
+# API service accounts
+# -----------------------------
+# Comma-separated user_name values allowed to POST /auth/login when PERMISSIONS_ENFORCED is on.
+API_SERVICE_ACCOUNTS = get_config("Auth", "api_service_accounts", "API_SERVICE_ACCOUNTS")
+
+
+# -----------------------------
 # Email / SMTP (shared doubts and suggestions)
 # -----------------------------
 SMTP_HOST = get_config("Email", "host", "SMTP_HOST", raw=True)

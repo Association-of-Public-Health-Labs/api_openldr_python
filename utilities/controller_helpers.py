@@ -159,6 +159,9 @@ def authenticate_request():
 
     g.permissions = permissions_for_token(token_payload)
     if permissions_enforced():
+        # An API token (no ``iss``) is accepted only for a listed service account.
+        if not token_payload.get("iss") and not g.permissions.service:
+            return None, unauthorized_response()
         dashboard = dashboard_for_path(request.path)
         if dashboard is not None and dashboard not in g.permissions.dashboards:
             return None, forbidden_response()
