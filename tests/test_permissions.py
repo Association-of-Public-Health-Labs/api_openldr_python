@@ -14,6 +14,7 @@ from utilities.permissions import (
     dashboard_for_path,
     forbidden_response,
     parse_claim,
+    permissions_enforced,
     permissions_for_token,
 )
 
@@ -106,7 +107,8 @@ def test_flag_on_with_dashboard_passes(client, clerk_config, enforced):
     service.assert_called_once()
 
 
-def test_flag_off_without_claim_passes(client, clerk_config):
+def test_flag_off_without_claim_passes(app, client, clerk_config, monkeypatch):
+    monkeypatch.setitem(app.config, "PERMISSIONS_ENFORCED", False)
     response, _ = get_vl(client, bearer())
     assert response.status_code == 200
 
@@ -144,3 +146,25 @@ def test_flag_on_cached_report_without_dashboard_is_403(app, client, clerk_confi
     denied = client.get(VL_URL, query_string=query, headers=bearer(["tb"]))
     assert denied.status_code == 403
     assert "X-Report-Cache" not in denied.headers
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [("1", True), ("0", False), ("true", False), ("yes", False), (" 1", False), ("", False), (None, False)],
+)
+def test_permissions_enforced_from_env(app, monkeypatch, value, expected):
+    monkeypatch.delitem(app.config, "PERMISSIONS_ENFORCED", raising=False)
+    if value is None:
+        monkeypatch.delenv("PERMISSIONS_ENFORCED", raising=False)
+    else:
+        monkeypatch.setenv("PERMISSIONS_ENFORCED", value)
+    with app.app_context():
+        assert permissions_enforced() is expected
+
+
+@pytest.mark.parametrize("value,expected", [(True, True), ("1", True), (False, False), ("0", False), ("true", False)])
+def test_permissions_enforced_from_config_wins_over_env(app, monkeypatch, value, expected):
+    monkeypatch.setenv("PERMISSIONS_ENFORCED", "1")
+    monkeypatch.setitem(app.config, "PERMISSIONS_ENFORCED", value)
+    with app.app_context():
+        assert permissions_enforced() is expected

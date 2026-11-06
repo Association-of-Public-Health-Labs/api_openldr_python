@@ -33,11 +33,11 @@ NO_PERMISSIONS = Permissions()
 
 
 def permissions_enforced():
-    """``PERMISSIONS_ENFORCED`` in the app config wins (tests); otherwise the environment."""
+    """``PERMISSIONS_ENFORCED`` in the app config wins (tests); otherwise the environment. Only ``1`` is on."""
     flag = current_app.config.get("PERMISSIONS_ENFORCED")
     if flag is not None:
-        return bool(flag)
-    return os.environ.get("PERMISSIONS_ENFORCED", "0").strip().lower() in ("1", "true", "yes", "on")
+        return flag in (True, "1")
+    return os.environ.get("PERMISSIONS_ENFORCED") == "1"
 
 
 def parse_claim(claims):
