@@ -6,13 +6,15 @@ integrada em `dev` e validada pelo utilizador. A partir da etapa 2, cada branch
 de correcção parte de `izi` e é integrada apenas em `izi`, após revisão e testes.
 O utilizador faz pessoalmente a integração e a validação em `dev` antes da etapa
 seguinte. A integração local não implica publicação no repositório remoto.
+Na revisão actual da etapa 3, pediu trabalho directamente em `izi`, preservando
+as suas alterações de login e deixando o commit para execução manual.
 
 | Etapa | Branch | Âmbito | Estado |
 | --- | --- | --- | --- |
 | 1 | `fix/01-database-config` | Configuração SQL e recuperação da suite de testes | Validada pelo utilizador |
 | 2 | `fix/02-user-create-permissions` | Autorização para criar utilizadores e atribuir papéis | Concluída localmente; aguarda validação do utilizador |
 | 2B | `feat/02-dashboard-roles` | Papéis de leitura por subdivisão e gestão das atribuições | Concluída localmente; aguarda validação do utilizador |
-| 3 | `fix/03-login-credentials` | Login local e credenciais de contas Clerk | Por iniciar |
+| 3 | `izi`, revisão local sem commit por pedido do utilizador | Login local e credenciais de contas Clerk | Testes locais aprovados; falta validação pessoal da password real |
 | 4 | `fix/04-reporting-errors` | Respostas HTTP de erro dos relatórios e interacção com cache | Por iniciar |
 | 5 | `fix/05-patient-log-privacy` | Protecção de dados de pacientes nos logs de erro | Por iniciar |
 
@@ -188,3 +190,98 @@ também cobre criação/atribuição, revogação com token e cache existentes, 
 de consulta, sugestões por família e sincronização Clerk. A worktree inicial
 de `izi` tem as mesmas quatro alterações locais da equipa descritas na etapa 2;
 continuam fora do commit desta extensão e devem ser preservadas na integração.
+
+## Etapa 3 — Login por password e compatibilidade Clerk
+
+Revisão de 12 de Novembro de 2026, directamente em `izi`, sobre o commit
+`8f4b047`. O utilizador já tinha alterado o login e o esquema Swagger. Essas
+alterações e a formatação da equipa foram preservadas e completadas; não foi
+criada outra branch, commit, merge ou publicação nesta revisão. `dev` não foi
+alterada pelo agente.
+
+### Problemas encontrados e correcções
+
+- O login ainda obrigava ao nome de utilizador e a pesquisa exigia também o
+  email, impedindo os casos com apenas um identificador. Agora aceita `username`
+  **ou** `email` com password; quando ambos são enviados, têm de identificar a
+  mesma conta única. Duplicados devolvem 401, sem seleccionar uma linha arbitrária.
+- A password é verificada pelo hash bcrypt, sem usar `user_id` na pesquisa.
+  Credenciais incorrectas passam a devolver um objecto e HTTP 401 real, em vez
+  de uma tupla serializada com HTTP 200. Entradas em falta, de tipo inválido ou
+  acima dos 72 bytes UTF-8 suportados por bcrypt devolvem 400. Espaços exteriores
+  dos identificadores são ignorados; os da password continuam significativos.
+- Falhas de consulta, criação de token ou commit devolvem 500 genérico, sem SQL,
+  credenciais ou detalhes internos na resposta. Foi retirado o debug com dados
+  do utilizador. Timestamp e auditoria de sucesso são gravados juntos, depois
+  da criação do token, e são revertidos em caso de falha.
+- Novas contas Clerk recebem um segredo local aleatório, em vez do identificador
+  público como password. O login local também rejeita a password igual a
+  `user_id`, incluindo contas legadas, sem reescrever hashes existentes. Para
+  activar login local nessas contas, um Admin deve atribuir uma password própria.
+- JWT Clerk RS256 e webhooks Svix mantêm a verificação independente. Eventos
+  assinados de sessão/perfil preservam passwords e papéis locais; metadados
+  Clerk não atribuem novos privilégios. O login por password não consulta Clerk.
+- README, esquema Swagger e [matriz de acesso](access-control.md) foram
+  actualizados para reflectir o contrato e os limites da validação.
+
+Os defeitos históricos de unicidade na criação/actualização não foram alterados
+nesta revisão. A rejeição de identificadores ambíguos protege o login sem fundir,
+eliminar ou modificar contas da equipa. Passwords legadas acima de 72 bytes
+precisam de actualização administrativa para usar este contrato.
+
+### Validação automatizada
+
+| Verificação | Resultado |
+| --- | --- |
+| Novos testes de login antes das correcções | 38 falhas e 12 sucessos, antes dos casos adicionais |
+| Login, bcrypt, erros HTTP, transacção e coexistência Clerk | 58 sucessos |
+| Papel VL nas rotas registadas, com JWT de password e Clerk | 308 sucessos |
+| Testes dirigidos, incluindo webhook, autenticação e Swagger | 424 sucessos |
+| Suite completa em `izi` | 2 128 sucessos, 1 ignorado, nenhuma falha |
+| Revisão independente do login e integração Clerk | Sem bloqueadores funcionais novos identificados |
+| Verificação do diff | `git diff --check` sem erros |
+
+Os testes percorrem as 147 rotas GET de relatórios e dicionários actualmente
+registadas, para os dois emissores de token. Por emissor, o papel `vl` obtém:
+
+| Grupo | Rotas | HTTP esperado |
+| --- | ---: | --- |
+| Relatórios agregados VL, com filtros permitidos | 43 | 200 |
+| Dicionários partilhados | 6 | 200 |
+| Pesquisas de pacientes VL, reservadas a Admin | 4 | 403 |
+| DPI/EID | 41 | 403 |
+| TB GeneXpert | 46 | 403 |
+| TB cultura | 7 | 403 |
+
+Também são testadas as seis rotas de sugestões para ambos os tokens e a
+proibição de listar utilizadores com papel VL. A política continua a reservar
+agregados por unidade sanitária e drill-downs individuais a Admin.
+
+Estas verificações usam HTTP, validação de JWT, parsing, papel persistido e
+pipeline de autorização reais, com SQLite e contas sintéticas. Consultas dos
+relatórios, transporte JWKS, perfis Clerk e envio de email são substituídos nos
+testes. Por isso, os resultados comprovam o controlo de acesso e os contratos,
+sem comprovar indicadores SQL, dados clínicos ou disponibilidade do Clerk real.
+
+```powershell
+python -m pytest tests/test_login.py tests/test_vl_role_route_access.py tests/test_clerk_webhook.py tests/test_auth_enforcement.py tests/test_swagger_docstrings.py -q
+python -m pytest -q
+git diff --check
+```
+
+### Conta fornecida e validação pessoal pendente
+
+Foi consultado apenas o cadastro autorizado no SQL Server, em leitura: a conta
+existe, tem papel `vl`, nome de utilizador único e hash bcrypt. O identificador
+público não corresponde à password guardada. O email está associado a duas
+contas; login apenas por esse email é ambíguo e será rejeitado com 401. Deve ser
+usado o nome de utilizador único, ou o par nome/email quando único, com a
+password correcta. Nenhuma conta, hash, papel, auditoria ou `last_login` real
+foi modificado por esta verificação.
+
+A password em texto claro não foi fornecida, pelo que não foi efectuado login
+real dessa conta nem emitido um token em seu nome. Não foram consultados os
+relatórios clínicos reais. Antes de avançar para a etapa seguinte, o utilizador
+deve confirmar o login com a sua password no ambiente configurado e o acesso
+a um relatório VL e a uma subdivisão proibida. O código fica localmente em
+`izi`, sem staging nem commit, para essa validação e commit manual.

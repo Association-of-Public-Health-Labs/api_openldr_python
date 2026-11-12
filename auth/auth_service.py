@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from db.database import db
 from flask import session
 from configs.paths import *
+
 # from configs.paths_local import *
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
 
 def _error_response(status: int, error: str, message: str) -> dict:
     """Create a standardized error response."""
@@ -63,89 +65,111 @@ def _build_user_data(user) -> dict:
 
 
 def login_user_service(args):
-
-    login_username = args.get("username")
-    login_email = args.get("email")
+    """Authenticate one unambiguous account using its bcrypt password hash."""
+    raw_username = args.get("username")
+    raw_email = args.get("email")
     login_password = args.get("password")
-
-    if login_username:
-        user_query = User.query.filter_by(user_name=login_username, user_id=login_password).first()
-    else:
-        user_query = User.query.filter_by(email=login_email, user_id=login_password).first()
-
-    if not user_query or not bcrypt.checkpw(
-        login_password.encode("utf-8"), user_query.password.encode("utf-8")
-    ):    
-        return (
-            {
-                "status": 401,
-                "error": "Unauthorized",
-                "message": "Invalid credentials",
-            },
+    if any(
+        value is not None and not isinstance(value, str)
+        for value in (raw_username, raw_email)
+    ):
+        return _error_response(400, "Bad Request", "Username/email must be strings")
+    login_username = raw_username.strip() if raw_username else None
+    login_email = raw_email.strip() if raw_email else None
+    if (
+        not (login_username or login_email)
+        or not isinstance(login_password, str)
+        or not login_password
+    ):
+        return _error_response(
+            400, "Bad Request", "Username/email and password are required"
         )
-    else:
-        user_query.last_login = datetime.now()
+    try:
+        password_bytes = login_password.encode("utf-8")
+    except UnicodeEncodeError:
+        return _error_response(400, "Bad Request", "Invalid password format")
+    # bcrypt only distinguishes the first 72 bytes. Do not accept longer input
+    # as another password sharing the same prefix.
+    if len(password_bytes) > 72:
+        return _error_response(
+            400, "Bad Request", "Password exceeds bcrypt's 72-byte limit"
+        )
 
-        # Store values before commit
-        user_id = user_query.user_id
-        user_name = user_query.user_name
-        user_first_name = user_query.first_name
-        user_last_name = user_query.last_name
-        user_email = user_query.email
-        role = get_user_role(user_query)
-
-        db.session.commit()
-
+    invalid = _error_response(401, "Unauthorized", "Invalid credentials")
+    try:
+        identifiers = {}
+        if login_username:
+            identifiers["user_name"] = login_username
+        if login_email:
+            identifiers["email"] = login_email
+        # When both identifiers are supplied they must identify the same row.
+        # Duplicates must never select an arbitrary account through .first().
+        matches = User.query.filter_by(**identifiers).limit(2).all()
+        if len(matches) != 1:
+            return invalid
+        user = matches[0]
+        if login_password == user.user_id:
+            return invalid
         try:
-            save_user_log_service(
-                {
-                    "user_id": user_id,
-                    "log_type": "login",
-                    "log_details": {
+            password_matches = bcrypt.checkpw(
+                password_bytes, user.password.encode("utf-8")
+            )
+        except (ValueError, TypeError, AttributeError):
+            return invalid
+        if not password_matches:
+            return invalid
+
+        user_data = {
+            "user_id": user.user_id,
+            "user_name": user.user_name,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email_address": user.email,
+            "role": get_user_role(user),
+        }
+        # Create the token before persisting a successful-login marker. The
+        # login timestamp and audit entry are committed together.
+        access_token = create_access_token(
+            identity=user.user_id,
+            additional_claims=user_data,
+            expires_delta=timedelta(hours=1),
+        )
+        user.last_login = datetime.now()
+        db.session.add(
+            UserLogs(
+                user_id=user.user_id,
+                log_id=str(uuid4()),
+                log_date=datetime.now(),
+                log_type="login",
+                log_details=json.dumps(
+                    {
                         "event": "login",
                         "source": "auth_service.login_user_service",
                         "user": {
-                            "user_id": user_id,
-                            "user_name": user_name,
-                            "first_name": user_first_name,
-                            "last_name": user_last_name,
-                            "role": role,
-                            "email": user_email,
+                            "user_id": user.user_id,
+                            "user_name": user.user_name,
+                            "first_name": user.first_name,
+                            "last_name": user.last_name,
+                            "role": user.role,
+                            "email": user.email,
                         },
                         "message": "Login successful",
                         "context": {},
-                    },
-                }
+                    }
+                ),
             )
-            access_token = create_access_token(
-                identity= user_id,
-                additional_claims={
-                    "user_name": user_name,
-                    "first_name": user_first_name,
-                    "last_name": user_last_name,
-                    "role": role,
-                    "user_id": user_id,
-                    "email_address": user_email,
-                },
-                expires_delta=timedelta(hours=1),
-            )
-        except Exception as e:
-            db.session.rollback()
-            return {"status": 500, "error": "Internal Server Error", "message": str(e)}
-
+        )
+        db.session.commit()
         return {
             "message": "Login successful",
-            "data": {
-                "user_id": user_id,
-                "user_name": user_name,
-                "first_name": user_first_name,
-                "last_name": user_last_name,
-                "email_address": user_email,
-                "role": role,
-            },
+            "data": user_data,
             "token": access_token,
             "status": 200,
         }
+    except Exception as exc:
+        db.session.rollback()
+        logger.error("Local login failed (%s)", type(exc).__name__)
+        return _error_response(500, "Internal Server Error", "An error occurred")
 
 
 def logout_user_service(args):
@@ -188,18 +212,28 @@ def update_user_service(args, id):
 
     # Validate required fields
     required_fields = [
-        update_username, update_first_name, update_last_name,
-        update_email, update_role, update_user_id
+        update_username,
+        update_first_name,
+        update_last_name,
+        update_email,
+        update_role,
+        update_user_id,
     ]
     if not all(required_fields):
         return _error_response(400, "Bad Request", "Invalid input")
 
     update_role = normalize_role(update_role)
     if update_role is None:
-        return _error_response(400, "Bad Request", "Role must be one of: " + ", ".join(CANONICAL_ROLES))
+        return _error_response(
+            400, "Bad Request", "Role must be one of: " + ", ".join(CANONICAL_ROLES)
+        )
 
     change_password = update_password is not None or update_confirm_password is not None
-    if change_password and (not update_password or not update_confirm_password or update_password != update_confirm_password):
+    if change_password and (
+        not update_password
+        or not update_confirm_password
+        or update_password != update_confirm_password
+    ):
         return _error_response(400, "Bad Request", "Passwords do not match")
 
     user_query = User.query.filter_by(user_id=update_user_id).first()
@@ -248,7 +282,7 @@ def delete_user_service(id, current_user=None):
     """
     Delete a user by ID.
     Note: Logging is handled by the controller (Clerk webhook).
-    
+
     Args:
         id: User ID to delete
         current_user: Optional - authenticated user ID for permission check.
@@ -320,8 +354,10 @@ def sync_clerk_user_service(args):
     if not args.get("user_id"):
         return _error_response(400, "Bad Request", "User ID is required")
     fields = {
-        "user_name": args.get("username"), "first_name": args.get("first_name"),
-        "last_name": args.get("last_name"), "email": args.get("email"),
+        "user_name": args.get("username"),
+        "first_name": args.get("first_name"),
+        "last_name": args.get("last_name"),
+        "email": args.get("email"),
     }
     if not all(fields.values()):
         return _error_response(400, "Bad Request", "Profile fields are required")
@@ -355,15 +391,22 @@ def _create_user_record(args):
 
     # Validate required fields
     required_fields = [
-        create_username, create_first_name, create_last_name,
-        create_password, create_confirm_password, create_email, create_role
+        create_username,
+        create_first_name,
+        create_last_name,
+        create_password,
+        create_confirm_password,
+        create_email,
+        create_role,
     ]
     if not all(required_fields):
         return _error_response(400, "Bad Request", "All fields are required")
 
     create_role = normalize_role(create_role)
     if create_role is None:
-        return _error_response(400, "Bad Request", "Role must be one of: " + ", ".join(CANONICAL_ROLES))
+        return _error_response(
+            400, "Bad Request", "Role must be one of: " + ", ".join(CANONICAL_ROLES)
+        )
 
     if create_password != create_confirm_password:
         return _error_response(400, "Bad Request", "Passwords do not match")
@@ -373,7 +416,9 @@ def _create_user_record(args):
     for user in existing_users:
         if user.user_name == create_username or user.email == create_email:
             if _verify_password(create_password, user.password):
-                return _error_response(400, "Bad Request", "Username or email already exists")
+                return _error_response(
+                    400, "Bad Request", "Username or email already exists"
+                )
 
     new_user_id = args.get("user_id") or str(uuid4())
 
@@ -442,7 +487,10 @@ def get_all_users_service(id):
                         "role": user.role,
                     },
                     "message": "Fetched all users",
-                    "context": {"count": len(users), "user_ids": [u.user_id for u in users]},
+                    "context": {
+                        "count": len(users),
+                        "user_ids": [u.user_id for u in users],
+                    },
                 },
             }
         )
@@ -470,7 +518,9 @@ def get_user_by_id_service(id):
     Returns:
         User: The user object if found, None otherwise.
     """
-    user = User.query.filter(User.user_id == id).order_by(User.start_date.desc()).first()
+    user = (
+        User.query.filter(User.user_id == id).order_by(User.start_date.desc()).first()
+    )
 
     return user
 
@@ -501,7 +551,7 @@ def update_last_login_service(user_id: str):
         user = User.query.filter_by(user_id=user_id).first()
         if not user:
             return _error_response(404, "Not Found", "User not found")
-        
+
         user.last_login = datetime.now()
         db.session.commit()
         return {"status": 200, "message": "last_login updated"}

@@ -87,6 +87,23 @@ Admin atribuir uma subdivisão ou `global`. Eventos assinados `user.updated`
 actualizam o perfil, preservando o papel e a password administrados localmente.
 Metadados Clerk não podem atribuir `Admin` ou mudar uma subdivisão.
 
+## Login local e Clerk
+
+`POST /auth/login` aceita `username` ou `email` com a password local, verificada
+pelo hash bcrypt. Se forem enviados ambos os identificadores, têm de corresponder
+à mesma conta única. Um identificador ambíguo devolve 401; a API não escolhe a
+primeira conta. A password não é aparada e admite até 72 bytes UTF-8. Entradas
+inválidas devolvem 400, credenciais incorrectas 401 e falhas internas 500 genérico.
+O token conserva o `sub` da conta; não atribui novos privilégios. Timestamp e
+auditoria do login são confirmados na mesma transacção após a criação do token.
+
+O login local não consulta o Clerk. A verificação de JWT Clerk RS256 e dos
+webhooks Svix mantém-se independente. Novas contas Clerk recebem um segredo
+local aleatório, sem usar o identificador público como password. Sessões e
+actualizações de perfil mantêm o hash e o papel existentes. Contas legadas cuja
+password era o próprio `user_id` precisam de uma password local atribuída por
+Admin para usar este login; continuam a poder autenticar-se pelo Clerk.
+
 ## Introdução em ambiente de validação
 
 Antes de disponibilizar esta versão às dashboards, um Admin deve atribuir o
@@ -101,6 +118,8 @@ Novos controladores devem usar `run_reporting_endpoint`, ou a combinação
 de caminhos não instala um bloqueio global: um novo módulo precisa ser
 registado na política e usar a pipeline autenticada, com testes de acesso.
 
-O fluxo de branches continua `branch isolada -> testes -> izi`; a integração
-e a validação pessoal em `dev` pertencem ao utilizador. As correcções de login
-e credenciais continuam na etapa 3 do [registo de melhorias](priority-improvements.md).
+O fluxo geral de branches continua `branch isolada -> testes -> izi`; a integração
+e a validação pessoal em `dev` pertencem ao utilizador. Para a revisão actual do
+login, o utilizador pediu alterações directamente em `izi`, sem commit automático.
+Os resultados e limites constam da etapa 3 do
+[registo de melhorias](priority-improvements.md).

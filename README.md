@@ -117,7 +117,7 @@ See [Doubts and suggestions](docs/suggestions.md) for the payload, authenticatio
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| `POST` | `/auth/login` | Login with username and password, returns JWT token | No |
+| `POST` | `/auth/login` | Login with username or email and local password, returns JWT token | No |
 | `POST` | `/auth/create` | Create a new user (Admin only) | Yes (JWT) |
 | `PUT` | `/auth/update` | Update user details (Admin only) | Yes (JWT) |
 | `DELETE` | `/auth/delete` | Delete a user (Admin only) | Yes (JWT) |
@@ -409,11 +409,25 @@ The API uses **JWT (JSON Web Tokens)** for authentication with two integration p
 
 ### Direct Login
 
+Send `username` **or** `email` with the existing local password. If both
+identifiers are sent, they must match the same unique local account. The API
+checks the stored bcrypt hash; `user_id` is an identity, never a password.
+
 ```bash
 curl -X POST http://localhost:5000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "your_password"}'
 ```
+
+Email-only example: `{"email": "admin@example.com", "password": "your_password"}`.
+An identifier shared by multiple accounts returns HTTP 401; use a unique
+username, or both identifiers if the pair is unique. No accounts are selected
+arbitrarily or merged automatically. Identifiers are trimmed; password whitespace
+is significant. Passwords must fit bcrypt's 72 UTF-8 byte limit.
+
+Missing/non-string credentials return HTTP 400, incorrect or ambiguous
+credentials return HTTP 401, and internal failures return a generic HTTP 500.
+Login time and audit are saved together only after token creation succeeds.
 
 The response includes a JWT token:
 
@@ -450,6 +464,14 @@ The API supports [Clerk](https://clerk.com/) as an external identity provider vi
 2. **Existing users** have their session recorded; the webhook never issues an API access token
 3. **User updates/deletions** from Clerk are synced to the local database
 4. All events are logged to the `UserLogs` table
+
+Clerk RS256 bearer tokens and Svix webhook verification remain independent of
+local password login. Local login does not call Clerk. New Clerk accounts are
+provisioned with a random local secret, rather than their public `user_id`; an
+Admin can assign a local password later. Existing passwords and roles are
+preserved on session/profile events. Legacy accounts whose local password was
+their public identifier cannot use that value for local login and need an Admin
+password update; their Clerk authentication continues to work.
 
 ### Roles
 
@@ -492,7 +514,7 @@ creation endpoint cannot select this path through request fields. Signed Clerk
 profile updates preserve locally assigned roles and passwords. Admin can assign
 roles through `PUT /auth/update` while omitting both password fields to keep the
 existing password. The local
-login and Clerk credential changes are tracked separately as stage 3 in the
+login and Clerk credential validation is recorded as stage 3 in the
 [priority improvement record](docs/priority-improvements.md).
 
 ## Getting Started
@@ -628,7 +650,7 @@ python -m pytest -q
 python tests/test_hiv_endpoints.py
 ```
 
-The pytest suite excludes the standalone live script and uses mocks/SQLite; passing it does not verify SQL Server connectivity or production indicator values. See [priority improvement stages](docs/priority-improvements.md) for the per-branch validation record.
+The pytest suite excludes the standalone live script and uses mocks/SQLite; passing it does not verify SQL Server connectivity or production indicator values. Password login, Clerk coexistence and VL access across every registered reporting GET route can be checked with `python -m pytest tests/test_login.py tests/test_vl_role_route_access.py -q`. These checks use synthetic credentials, locally signed tokens and replaced report services. See [priority improvement stages](docs/priority-improvements.md) for the validation record and the separate read-only account check.
 
 ## Troubleshooting
 
