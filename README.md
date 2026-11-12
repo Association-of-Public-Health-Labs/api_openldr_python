@@ -17,6 +17,7 @@ A RESTful API for epidemiological and laboratory reporting, with endpoints for T
 - [Common Parameters](#common-parameters)
 - [Pagination](#pagination)
 - [Authentication](#authentication)
+- [Dashboard roles and access matrix](docs/access-control.md)
 - [Doubts and suggestions](docs/suggestions.md)
 - [Getting Started](#getting-started)
 - [Deployment](#deployment)
@@ -452,8 +453,23 @@ The API supports [Clerk](https://clerk.com/) as an external identity provider vi
 
 ### Roles
 
-- **Admin** — Full access to all endpoints, including patient data and user management
-- **user** — Standard access (default role for Clerk-provisioned users)
+- **vl**, **dpi**, **tb_gx**, **tb_cl**, **ad** — Reports for the assigned subdivision.
+- **global** — Reports across all subdivisions, without user-management privileges.
+- **Admin** — All report access, existing privileged patient views and user management.
+- **user** — Unassigned legacy/provisioning role; an Admin must assign a subdivision before report access.
+
+Each account has one stored role. `dpi` uses the existing `/hiv/eid/*` URLs,
+`tb_gx` uses `/tb/gx/*`, and `tb_cl` uses `/tb/cultura/*`. AD permissions reserve
+`/hiv/ad/*`; they do not create AD endpoints. The API checks the stored role on
+each request, before the report cache, using the verified JWT subject. A role
+claim in a token cannot override the local account. Cross-subdivision requests
+return 403. Shared `/dict/*` endpoints now require an authenticated, assigned role.
+
+Existing Admin restrictions on patient searches, VL single-facility aggregates
+and drill-downs returning individual records are preserved. See the
+[access matrix and assignment procedure](docs/access-control.md), including
+the rollout step for existing `user` accounts. Swagger remains full public
+documentation; access to the documented data is enforced separately.
 
 ### Creating users
 
@@ -463,16 +479,19 @@ not grant this permission. Missing local accounts and other stored roles are
 rejected with HTTP 403 before any user is created.
 
 The existing required fields remain `username`, `first_name`, `last_name`,
-`password`, `confirm_password`, `email` and `role`. New roles are normalised:
-`admin`/`Admin` become `Admin`, and `user`/`User` become `user`; comparison is
-case-insensitive and surrounding whitespace is ignored. Unsupported roles and
+`password`, `confirm_password`, `email` and `role`. Supported roles are `Admin`,
+`global`, `vl`, `dpi`, `tb_gx`, `tb_cl`, `ad` and unassigned `user`. Input is
+normalised case-insensitively and surrounding whitespace is ignored. Unsupported roles and
 invalid creation data return HTTP 400. Existing stored roles are unchanged.
 Successful creation retains HTTP 200 and the existing response payload.
 Unexpected creation failures return HTTP 500 with a generic message.
 
 The signed Clerk webhook uses a separate internal provisioning service that
 always assigns `user`, without requiring an existing local Admin. The public
-creation endpoint cannot select this path through request fields. The local
+creation endpoint cannot select this path through request fields. Signed Clerk
+profile updates preserve locally assigned roles and passwords. Admin can assign
+roles through `PUT /auth/update` while omitting both password fields to keep the
+existing password. The local
 login and Clerk credential changes are tracked separately as stage 3 in the
 [priority improvement record](docs/priority-improvements.md).
 

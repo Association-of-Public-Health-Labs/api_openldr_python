@@ -32,12 +32,15 @@ Usage example::
 """
 
 from flask import current_app, request, session
+from functools import wraps
 from flask_restful import reqparse
 from werkzeug.exceptions import HTTPException
 
 import logging
 
 from utilities import report_cache
+from auth.auth_service import get_user_by_id_service
+from auth.roles import role_can_access_path
 from utilities.service_helpers import InvalidParameter
 from utilities.token_verification import TokenVerificationError, verify_bearer_token
 from utilities.utils import get_token, get_user_token_info
@@ -133,7 +136,9 @@ def unauthorized_response():
 
 def authenticate_request():
     """
-    Verify the signature of the incoming request's JWT and populate ``session['user_info']``.
+    Verify the JWT, resolve its subject's persisted role and authorize the route.
+    Populate ``session['user_info']`` only after authorization. Missing local
+    accounts and unassigned/unknown roles fail closed, before any report/cache.
 
     Returns
     -------
@@ -143,6 +148,7 @@ def authenticate_request():
         ``None`` and ``error_response`` is a Flask response ready to be
         returned from the endpoint.
     """
+    session.pop("user_info", None)
     token = get_token(request)
 
     try:
@@ -151,9 +157,50 @@ def authenticate_request():
         logger.warning("Rejected token on %s: %r", request.path, str(exc))
         return None, unauthorized_response()
 
-    session["user_info"] = get_user_token_info(token_payload)
-    user_id = str(session["user_info"].get("user_id"))
+    # The verified subject identifies the account; custom claims cannot select
+    # another user's persisted permissions or retain a revoked role.
+    user_id = token_payload.get("sub")
+    if not isinstance(user_id, str) or not user_id:
+        return None, unauthorized_response()
+    try:
+        user = get_user_by_id_service(user_id)
+    except Exception as exc:
+        logger.error("Role lookup failed on %s (%s)", request.path, type(exc).__name__)
+        return None, ({"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500)
+
+    role = user.role if user is not None else None
+    if not role_can_access_path(role, request.path):
+        return None, forbidden_response()
+    if role != "Admin" and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        suggestion_paths = {
+            "/hiv/send-suggestion", "/hiv/vl/send-suggestion", "/hiv/eid/send-suggestion",
+            "/tb/send-suggestion", "/tb/gx/send-suggestion", "/tb/cultura/send-suggestion",
+        }
+        if request.method != "POST" or request.path.rstrip("/") not in suggestion_paths:
+            return None, forbidden_response()
+    # Preserve the existing restriction on identifiable patient searches.
+    if "patients" in request.path.strip("/").split("/") and role != "Admin":
+        return None, forbidden_response()
+
+    user_info = get_user_token_info(token_payload)
+    user_info.update(user_id=user_id, role=role)
+    session["user_info"] = user_info
     return user_id, None
+
+
+def forbidden_response():
+    return {"status": "error", "code": 403, "message": "Access denied for this role"}, 403
+
+
+def authenticated_resource_method(method):
+    """Apply the same verified, persisted role policy to shared dictionaries."""
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        _, error = authenticate_request()
+        if error is not None:
+            return error
+        return method(*args, **kwargs)
+    return wrapped
 
 
 def service_result_response(result):
@@ -202,7 +249,7 @@ def run_reporting_endpoint(parse_fn, service_fn):
     """
     Execute the standard pipeline shared by every reporting endpoint.
 
-    1. Authenticate the request and populate the session.
+    1. Authenticate and authorize using the current database role, then populate the session.
     2. Serve a dashboard default report ("last 12 months") from the shared
        report cache when it holds a fresh copy (see ``utilities/report_cache.py``).
     3. Parse the request arguments via ``parse_fn``.
@@ -217,7 +264,7 @@ def run_reporting_endpoint(parse_fn, service_fn):
     if err is not None:
         return err
 
-    # After authentication: the cache never answers a request without a valid token.
+    # Authorization is checked against the database before any cached response.
     cache_key = report_cache.cache_key(request.path, dict(request.args.lists())) if _report_cache_active() else None
     if cache_key is not None and not FORCE_REFRESH:
         entry = report_cache.read(cache_key)

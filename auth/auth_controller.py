@@ -9,6 +9,7 @@ from auth.auth_service import (
     delete_user_service,
     create_user_service,
     provision_clerk_user_service,
+    sync_clerk_user_service,
     logout_user_service,
     get_user_by_id_service,
     save_user_log_service,
@@ -50,8 +51,10 @@ def _success_response(message: str, data: dict = None):
     return jsonify(response)
 
 
-def _creation_error_response(result):
-    """Map creation errors to HTTP status without leaking server details."""
+def _user_service_error_response(result):
+    """Map user-service errors to HTTP status without leaking server details."""
+    if not isinstance(result, dict):
+        return None
     status = result.get("code", result.get("status"))
     if isinstance(status, int) and 400 <= status <= 599:
         if status >= 500:
@@ -150,12 +153,15 @@ class user_controller(Resource):
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _error_response(401, "Unauthorized", "User not authenticated")
+            return _user_service_error_response({"status": 401, "error": "Unauthorized", "message": "User not authenticated"})
 
         try:
-            return jsonify(get_all_users_service(current_user))
+            result = get_all_users_service(current_user)
+            error = _user_service_error_response(result)
+            return error if error is not None else jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("User lookup failed (%s)", type(e).__name__)
+            return _user_service_error_response({"status": 500})
 
     def post(self):
         """
@@ -214,7 +220,7 @@ class user_controller(Resource):
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _error_response(401, "Unauthorized", "User not authenticated")
+            return _user_service_error_response({"status": 401, "error": "Unauthorized", "message": "User not authenticated"})
 
         parser = reqparse.RequestParser()
         parser.add_argument("username", required=True)
@@ -228,9 +234,12 @@ class user_controller(Resource):
         args = parser.parse_args()
 
         try:
-            return jsonify(update_user_service(args, current_user))
+            result = update_user_service(args, current_user)
+            error = _user_service_error_response(result)
+            return error if error is not None else jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("User update failed (%s)", type(e).__name__)
+            return _user_service_error_response({"status": 500})
 
     @jwt_required()
     def delete(self):
@@ -259,16 +268,19 @@ class user_controller(Resource):
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _error_response(401, "Unauthorized", "User not authenticated")
+            return _user_service_error_response({"status": 401, "error": "Unauthorized", "message": "User not authenticated"})
 
         parser = reqparse.RequestParser()
         parser.add_argument("user_id", required=True)
         args = parser.parse_args()
 
         try:
-            return jsonify(delete_user_service(args.user_id, current_user))
+            result = delete_user_service(args.user_id, current_user)
+            error = _user_service_error_response(result)
+            return error if error is not None else jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("User deletion failed (%s)", type(e).__name__)
+            return _user_service_error_response({"status": 500})
 
 
 class user_create_controller(Resource):
@@ -277,7 +289,7 @@ class user_create_controller(Resource):
         """
         Create a user on behalf of a persisted Admin.
         The caller's stored role must be exactly Admin; JWT role claims do not grant access.
-        New roles are normalised to Admin or user. Clerk provisioning uses a separate signed webhook.
+        Supported roles are Admin, global, vl, dpi, tb_gx, tb_cl, ad and unassigned user. Clerk provisioning uses a separate signed webhook.
         ---
         tags:
             - Authentication
@@ -300,7 +312,7 @@ class user_create_controller(Resource):
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _creation_error_response({"status": 401, "error": "Unauthorized", "message": "User not authenticated"})
+            return _user_service_error_response({"status": 401, "error": "Unauthorized", "message": "User not authenticated"})
 
         parser = reqparse.RequestParser()
         parser.add_argument("username", required=True)
@@ -314,13 +326,13 @@ class user_create_controller(Resource):
 
         try:
             result = create_user_service(args, current_user)
-            error = _creation_error_response(result)
+            error = _user_service_error_response(result)
             if error is not None:
                 return error
             return jsonify(result)
         except Exception as e:
             logger.error("User creation failed (%s)", type(e).__name__)
-            return _creation_error_response({"status": 500})
+            return _user_service_error_response({"status": 500})
 
 
 class clerk_user_controller(Resource):
@@ -478,8 +490,8 @@ class clerk_user_controller(Resource):
             user_create = provision_clerk_user_service(args)
         except Exception as exc:
             logger.error("Clerk user provisioning failed (%s)", type(exc).__name__)
-            return _creation_error_response({"status": 500})
-        error = _creation_error_response(user_create)
+            return _user_service_error_response({"status": 500})
+        error = _user_service_error_response(user_create)
         if error is not None:
             return error
 
@@ -516,7 +528,14 @@ class clerk_user_controller(Resource):
             return _error_response(400, "Bad Request", "Failed to fetch user from Clerk API")
 
         args = _build_user_args_from_clerk(user_id, clerk_data)
-        user_update = update_user_service(args, user_id)
+        try:
+            user_update = sync_clerk_user_service(args)
+        except Exception as exc:
+            logger.error("Clerk profile update failed (%s)", type(exc).__name__)
+            return _user_service_error_response({"status": 500})
+        error = _user_service_error_response(user_update)
+        if error is not None:
+            return error
 
         user_data = {
             "user_id": user_id,

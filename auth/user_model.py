@@ -15,7 +15,7 @@ class User(db.Model):
     password = Column(String(250), nullable=False)
     start_date = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
-    role = Column(String(50), nullable=False)  # e.g., 'admin', 'user', etc.
+    role = Column(String(50), nullable=False)  # One canonical role from auth.roles.
     email = Column(String(250), nullable=True)
     last_login = Column(DateTime, nullable=True)
 

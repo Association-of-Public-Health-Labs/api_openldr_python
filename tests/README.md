@@ -66,6 +66,19 @@ These verify stored Admin permissions, rejected privilege claims, supported
 creation roles, real HTTP errors and standard-role provisioning after Svix
 verification. They use isolated SQLite data and mocked Clerk fetches.
 
+Dashboard role isolation and assignment are covered by:
+
+```powershell
+python -m pytest tests/test_roles.py tests/test_dashboard_roles.py tests/test_dashboard_role_admin.py -q
+```
+
+The HTTP tests use real persisted SQLite accounts and verified test JWTs; only
+report queries and outbound Clerk/SMTP operations are replaced. They check all
+subdivisions, every dictionary route, role revocation before cached responses,
+Admin-only management and Clerk sync preserving local permissions. Existing
+endpoint fixtures now create an authorised local test account instead of
+assuming a token's role claim grants access.
+
 ```powershell
 # everything
 .\env\Scripts\python.exe -m pytest -q

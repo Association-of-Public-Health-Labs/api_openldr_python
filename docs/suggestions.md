@@ -49,6 +49,13 @@ com `get_user_by_id_service()`. Se o cadastro não tiver email, usa `email_addre
 ou `email` do token validado. Se não existir email válido nestas fontes, devolve
 400. `userEmail` do JSON não define destinatários nem substitui a identidade.
 
+O papel persistido também tem de autorizar o módulo: `vl`, `dpi`, `tb_gx`,
+`tb_cl` e `ad` ficam nas respectivas subdivisões; `global` e `Admin` abrangem
+todas. Os aliases `/hiv/send-suggestion` e `/tb/send-suggestion` aceitam os
+papéis da respectiva família. Uma conta ausente, não atribuída (`user`) ou de
+outra subdivisão recebe 403 antes de consultar email ou contactar SMTP. Ver a
+[matriz de acesso](access-control.md).
+
 ## Configuração SMTP
 
 Todas as opções SMTP são lidas em `configs/paths.py`, tal como as restantes
@@ -94,6 +101,7 @@ passar estas variáveis ao container, por exemplo com `env_file: .env` no Compos
 - **200**: SMTP aceitou a mensagem para todos os destinatários, incluindo CC.
 - **400**: JSON, payload, `duvida` ou email do utilizador inválido/ausente.
 - **401**: token ausente ou inválido.
+- **403**: conta sem papel atribuído ou sem acesso ao módulo.
 - **502**: falha de SMTP ou recusa de algum destinatário.
 - **503**: SMTP não configurado ou configuração inválida.
 - **500**: falha interna, por exemplo na consulta do cadastro.

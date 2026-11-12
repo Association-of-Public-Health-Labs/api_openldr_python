@@ -9,7 +9,8 @@ It recomputes the seed reports (``tools/report_cache_seeds.py``) and every other
 the cache, each over today's "last 12 months" window, through the endpoints themselves (same
 parameters, same code path, same JSON). It runs in its own process, outside the web server: the
 requests never leave it, and the token check is skipped only here because the warm-up asks for the
-same aggregates any signed-in user would get (no patient lists, no Admin-only views).
+same aggregates available to authorized dashboard roles (no patient lists or
+Admin-only views). The local warm-up bypass never grants privileges to HTTP clients.
 
 Exit code 1 when any report failed, so the scheduler shows the run as failed.
 """
