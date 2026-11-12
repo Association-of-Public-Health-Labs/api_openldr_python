@@ -20,6 +20,10 @@ TBData =
 Dictionary =
 Users =
 ReportData =
+; Optional ReportData overrides. Blank values use the selected main host/login.
+report_data_host =
+report_data_user =
+report_data_password =
 
 [Schemas]
 cdr_schema =

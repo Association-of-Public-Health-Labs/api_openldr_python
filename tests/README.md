@@ -42,6 +42,19 @@ pip install pytest
 
 ## Running the suite
 
+SQL configuration and production route registration regressions run without
+SQL Server or real credentials:
+
+```powershell
+python -m pytest tests/test_database_config.py tests/tb/test_tb_cultura_api_module.py -q
+```
+
+These cover environment/INI precedence on Windows and Linux, literal and escaped
+credentials, validation of selected binds, independent ReportData settings,
+pooling and safe connection diagnostics. The complete suite must pass before
+integrating a priority improvement into `dev`; see the
+[stage record](../docs/priority-improvements.md).
+
 ```powershell
 # everything
 .\env\Scripts\python.exe -m pytest -q
