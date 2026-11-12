@@ -3,6 +3,7 @@ import logging
 import bcrypt
 from flask_jwt_extended import create_access_token
 from auth.user_model import User, UserLogs
+from auth.roles import CANONICAL_ROLES, normalize_role
 from uuid import uuid4
 from datetime import datetime, timedelta
 from db.database import db
@@ -188,13 +189,17 @@ def update_user_service(args, id):
     # Validate required fields
     required_fields = [
         update_username, update_first_name, update_last_name,
-        update_password, update_confirm_password, update_email,
-        update_role, update_user_id
+        update_email, update_role, update_user_id
     ]
     if not all(required_fields):
         return _error_response(400, "Bad Request", "Invalid input")
 
-    if update_password != update_confirm_password:
+    update_role = normalize_role(update_role)
+    if update_role is None:
+        return _error_response(400, "Bad Request", "Role must be one of: " + ", ".join(CANONICAL_ROLES))
+
+    change_password = update_password is not None or update_confirm_password is not None
+    if change_password and (not update_password or not update_confirm_password or update_password != update_confirm_password):
         return _error_response(400, "Bad Request", "Passwords do not match")
 
     user_query = User.query.filter_by(user_id=update_user_id).first()
@@ -214,7 +219,8 @@ def update_user_service(args, id):
     user_query.user_name = update_username
     user_query.first_name = update_first_name
     user_query.last_name = update_last_name
-    user_query.password = _hash_password(update_password)
+    if change_password:
+        user_query.password = _hash_password(update_password)
     user_query.email = update_email
     user_query.role = update_role
     user_query.updated_at = datetime.now()
@@ -305,6 +311,35 @@ def provision_clerk_user_service(args):
     return _create_user_record({**args, "role": "user"})
 
 
+def sync_clerk_user_service(args):
+    """Sync a verified Clerk profile without overwriting local permissions.
+
+    Called only by the signed webhook. Role and password are administered
+    separately and must survive Clerk profile updates unchanged.
+    """
+    if not args.get("user_id"):
+        return _error_response(400, "Bad Request", "User ID is required")
+    fields = {
+        "user_name": args.get("username"), "first_name": args.get("first_name"),
+        "last_name": args.get("last_name"), "email": args.get("email"),
+    }
+    if not all(fields.values()):
+        return _error_response(400, "Bad Request", "Profile fields are required")
+    user = get_user_by_id_service(args["user_id"])
+    if user is None:
+        return _error_response(404, "Not Found", "User not found")
+    for name, value in fields.items():
+        setattr(user, name, value)
+    user.updated_at = datetime.now()
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        logger.error("Clerk profile persistence failed (%s)", type(exc).__name__)
+        return _error_response(500, "Internal Server Error", "An error occurred")
+    return {"message": "User updated successfully", "data": _build_user_data(user)}
+
+
 def _create_user_record(args):
     """
     Persist a user after public authorisation or verified webhook provisioning.
@@ -326,10 +361,9 @@ def _create_user_record(args):
     if not all(required_fields):
         return _error_response(400, "Bad Request", "All fields are required")
 
-    roles = {"admin": "Admin", "user": "user"}
-    create_role = roles.get(create_role.strip().lower()) if isinstance(create_role, str) else None
+    create_role = normalize_role(create_role)
     if create_role is None:
-        return _error_response(400, "Bad Request", "Role must be Admin or user")
+        return _error_response(400, "Bad Request", "Role must be one of: " + ", ".join(CANONICAL_ROLES))
 
     if create_password != create_confirm_password:
         return _error_response(400, "Bad Request", "Passwords do not match")

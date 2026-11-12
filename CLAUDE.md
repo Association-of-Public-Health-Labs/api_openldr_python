@@ -342,13 +342,24 @@ Key query builder helpers used across all modules:
   returns a token. `CLERK_WEBHOOK_SECRET_KEY` (`[Clerk] clerk_webhook_secret` on
   Windows) must equal the signing secret (`whsec_...`) of the Clerk webhook
   endpoint, otherwise the webhook rejects everything with 401.
-- Role-based access: Admin and User roles (`utilities/auth_helpers.py`).
+- Role-based access: dashboard scopes in `auth/roles.py`; privileged Admin
+  service checks remain in `utilities/auth_helpers.py`.
 - Public user creation (`POST /auth/create`) checks the caller's persisted role
   through `create_user_service`, requiring exactly `Admin`; never trust a role
-  claim to authorise creation. New roles are normalised to `Admin` or `user`.
+  claim to authorise creation. Role assignment uses `auth.roles.normalize_role`:
+  `Admin`, `global`, `vl`, `dpi`, `tb_gx`, `tb_cl`, `ad` and unassigned `user`.
   Clerk provisioning uses the separate `provision_clerk_user_service` only after
   Svix verification, always creating a standard `user`. Do not introduce request
   fields or a generic flag that bypass the public service's Admin check.
+- Reporting and dictionary access checks the verified JWT `sub` against the
+  current persisted role on every request, before reading the report cache.
+  Use `run_reporting_endpoint` for reports and the authenticated resource
+  decorator for dictionaries; a path-policy helper alone is not an HTTP gate.
+  Do not elevate legacy stored roles through normalisation at request time.
+  Preserve Admin restrictions on patients and privileged facility drill-downs.
+- Clerk profile sync must preserve the local role/password. Administrative role
+  updates may omit both password fields to retain the existing hash. See the
+  [role access matrix](docs/access-control.md) for routes and rollout requirements.
 
 ## Running Locally
 

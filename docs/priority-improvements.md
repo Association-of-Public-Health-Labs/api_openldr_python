@@ -11,6 +11,7 @@ seguinte. A integração local não implica publicação no repositório remoto.
 | --- | --- | --- | --- |
 | 1 | `fix/01-database-config` | Configuração SQL e recuperação da suite de testes | Validada pelo utilizador |
 | 2 | `fix/02-user-create-permissions` | Autorização para criar utilizadores e atribuir papéis | Concluída localmente; aguarda validação do utilizador |
+| 2B | `feat/02-dashboard-roles` | Papéis de leitura por subdivisão e gestão das atribuições | Concluída localmente; aguarda validação do utilizador |
 | 3 | `fix/03-login-credentials` | Login local e credenciais de contas Clerk | Por iniciar |
 | 4 | `fix/04-reporting-errors` | Respostas HTTP de erro dos relatórios e interacção com cache | Por iniciar |
 | 5 | `fix/05-patient-log-privacy` | Protecção de dados de pacientes nos logs de erro | Por iniciar |
@@ -143,3 +144,47 @@ testes e uma linha do README. Estas alterações pertencem à equipa e ficam for
 do commit da etapa 2. A integração deve preservá-las e os testes finais devem
 avaliar a cópia integrada. Os testes de autorização usam SQLite em memória e
 pedidos assinados de teste, sem SQL Server nem chamadas reais ao Clerk.
+
+## Extensão 2B — Papéis por dashboard
+
+Solicitada pelo utilizador após a etapa 2, antes de avançar para a correcção de
+login. Branch `feat/02-dashboard-roles`, a partir de `izi` no commit `481128c`.
+O destino continua `izi`; a integração em `dev` pertence ao utilizador.
+
+Foi introduzida a [matriz de acesso](access-control.md) para `vl`, `dpi`,
+`tb_gx`, `tb_cl`, `ad`, `global` e `Admin`, conservando `user` como papel ainda
+não atribuído. O campo único já existente é mantido, sem migração ou alteração
+de contas reais. A autorização usa o papel local e a identidade `sub` verificada
+antes de servir relatórios, incluindo cache. Os dicionários passam a exigir um
+papel atribuído. As restrições Admin de pacientes e drill-downs são preservadas.
+
+A criação e actualização administrativas usam a mesma lista de papéis. A
+atribuição de um papel pode conservar a password. O webhook sincroniza perfis
+sem substituir permissões e passwords locais; novos utilizadores continuam sem
+subdivisão até uma atribuição Admin. Os restantes problemas de login permanecem
+na etapa 3.
+
+Validação concluída na branch isolada:
+
+| Verificação | Resultado |
+| --- | --- |
+| Matriz HTTP antes do controlo por papel | 35 falhas, 33 sucessos |
+| Matriz HTTP final, seis dicionários, sugestões e métodos de leitura | 133 sucessos |
+| Suite completa, incluindo política pura, administração e Clerk | 1 754 sucessos, 1 ignorado, nenhuma falha |
+| Revisão independente | Sem bloqueadores identificados |
+| Verificação do diff | `git diff --check` sem erros |
+
+Comandos de reprodução:
+
+```powershell
+python -m pytest tests/test_roles.py tests/test_dashboard_roles.py tests/test_dashboard_role_admin.py -q
+python -m pytest -q
+git diff --check
+```
+
+Antes da correcção HTTP, os novos testes reproduziram **35 falhas e 33 sucessos**,
+incluindo leitura transversal indevida e dicionários públicos. A suite final
+também cobre criação/atribuição, revogação com token e cache existentes, falhas
+de consulta, sugestões por família e sincronização Clerk. A worktree inicial
+de `izi` tem as mesmas quatro alterações locais da equipa descritas na etapa 2;
+continuam fora do commit desta extensão e devem ser preservadas na integração.

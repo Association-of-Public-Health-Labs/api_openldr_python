@@ -1,9 +1,11 @@
 # utilities/swagger.py
+from auth.roles import CANONICAL_ROLES
+
 swagger_template = {
     "swagger": "2.0",
     "info": {
         "title": "OpenLDR Analytics API",
-        "description": "This is an API for managing OPENLDR Analytics Reports.",
+        "description": "OpenLDR reports use persisted dashboard roles: vl, dpi, tb_gx, tb_cl and ad. The global role reads all report subdivisions; Admin manages users and retains privileged patient access. Shared dictionaries require an assigned dashboard role. See docs/access-control.md for the access matrix.",
         "version": "1.0.0",
     },
     "securityDefinitions": {
@@ -141,7 +143,7 @@ swagger_template = {
             "in": "body",
             "schema": {"$ref": "#/definitions/user_update"},
             "required": True,
-            "description": "Data for updating a user account. Must be sent over HTTPS.",
+            "description": "Requires a persisted Admin. Set a supported dashboard role; omit password and confirm_password together to retain the current password. Must be sent over HTTPS.",
         },
         "UserDeletionParameters": {
             "name": "delete",
@@ -155,7 +157,7 @@ swagger_template = {
             "in": "body",
             "schema": {"$ref": "#/definitions/user_create"},
             "required": True,
-            "description": "Requires a caller with the persisted Admin role. New roles admin/Admin and user/User are normalised to Admin and user. Must be sent over HTTPS.",
+            "description": "Requires a persisted Admin. Supported roles are Admin, global, vl, dpi, tb_gx, tb_cl, ad and unassigned user. Input is normalised case-insensitively. Must be sent over HTTPS.",
         },
         "ProvinceParameter": {
             "name": "province",
@@ -719,9 +721,9 @@ swagger_template = {
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["admin", "user"],
+                    "enum": list(CANONICAL_ROLES),
                     "example": "user",
-                    "description": "The role of the user (admin or user).",
+                    "description": "Role to assign: Admin, global, vl, dpi, tb_gx, tb_cl, ad or unassigned user. Normalised case-insensitively.",
                 },
                 "email": {
                     "type": "string",
@@ -782,9 +784,9 @@ swagger_template = {
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["Admin", "admin", "user", "User"],
+                    "enum": list(CANONICAL_ROLES),
                     "example": "user",
-                    "description": "New role, normalised case-insensitively to Admin or user. Only a persisted Admin may assign it.",
+                    "description": "New dashboard role, normalised case-insensitively. Only a persisted Admin may assign it; user has no reporting scope.",
                 },
                 "email": {
                     "type": "string",

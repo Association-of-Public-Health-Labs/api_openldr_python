@@ -83,17 +83,21 @@ def test_authentication_before_email(client, mail_env, prefix, headers):
 
 
 @pytest.mark.parametrize("registered", [True, False])
-def test_clerk_identity_comes_from_verified_sub(client, mail_env, monkeypatch, registered):
+def test_clerk_identity_comes_from_verified_sub(client, mail_env, monkeypatch, persisted_user, registered):
     monkeypatch.setattr(paths, "CLERK_ISSUER", ISSUER)
     monkeypatch.setattr(paths, "CLERK_AUTHORIZED_PARTIES", TB_ORIGIN)
     monkeypatch.setattr(tv, "_clerk_jwks", tv.JwksCache(make_jwks))
-    if not registered:
+    if registered:
+        persisted_user(role="Admin", user_id="user_clerk_42")
+    else:
         mail_env[2].return_value = None
     response = client.post("/tb/gx/send-suggestion?duvida=true", json=PAYLOAD,
                            headers={"Authorization": f"Bearer {make_clerk_token(sub='user_clerk_42')}"})
-    assert response.status_code == (200 if registered else 400)
-    mail_env[2].assert_called_once_with("user_clerk_42")
-    if not registered:
+    assert response.status_code == (200 if registered else 403)
+    if registered:
+        mail_env[2].assert_called_once_with("user_clerk_42")
+    else:
+        mail_env[2].assert_not_called()
         mail_env[0].send_message.assert_not_called()
 
 
