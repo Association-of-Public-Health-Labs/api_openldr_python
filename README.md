@@ -607,7 +607,7 @@ For a named instance, use `sql.example.test\SQLEXPRESS`. For a fixed TCP port, u
 - ODBC pooling is enabled by default. For diagnostics, `SQL_ODBC_POOLING=false` sets the process-wide `pyodbc.pooling` before connections are opened. No `Pooling` or `Connection Timeout` attribute is added to the ODBC string.
 - SQLAlchemy pooling is independent and stays enabled by default with `pool_pre_ping=True` and `pool_recycle=1800`. Set `SQLALCHEMY_DISABLE_POOLING=true` to use `NullPool`.
 - The existing `SQL_QUERY_TIMEOUT` variable (default `180`) is passed to `pyodbc.connect(timeout=...)` through SQLAlchemy. It controls connection/login timeout, despite its historical name; it does not configure statement execution timeout.
-- Check the selected CDR databases with `python scripts/check_mssql_connection.py --bind vl` (or `--bind all` for VL, EID and TB). The script validates configuration first, then reads server identity and row counts. It prints error classes without driver exception text or credentials; failures return exit code 1.
+- Check the selected CDR databases with `python scripts/check_mssql_connection.py --bind vl` (or `--bind all` for VL, EID and TB). The script validates configuration first, then reads server identity and row counts, printing progress before connecting, checking SQL and counting rows. Failures return exit code 1 and print the error class, SQLSTATE and fixed guidance for recognised errors, without driver exception text or credentials. Error 17892 means login failed during LOGON trigger execution and needs investigation by the CDR administrator. The displayed `login_timeout` comes from `SQL_QUERY_TIMEOUT`; it does not limit row-count execution time.
 - Confirm network access to the configured SQL Server hosts.
 
 ## Testing

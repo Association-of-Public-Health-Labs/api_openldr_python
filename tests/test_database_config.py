@@ -257,3 +257,53 @@ def test_connection_check_does_not_print_driver_exception_details(
     assert "secret" not in output
     assert "remaining" not in output
     assert "private_user" not in output
+
+
+@pytest.mark.parametrize("driver_message", [
+    "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]"
+    "Logon failed for login 'private_user' due to trigger execution. "
+    "(17892) (SQLDriverConnect); [42000] [Microsoft][ODBC Driver 18 for SQL Server]"
+    "[SQL Server]Changed database context to 'private_db'. (5701)",
+    "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]"
+    "Localized server message for private_user. (17892)",
+])
+def test_connection_check_explains_logon_trigger_failure_without_login_details(
+    load_config, monkeypatch, capsys, driver_message
+):
+    from scripts import check_mssql_connection
+    from sqlalchemy.exc import ProgrammingError
+    from unittest.mock import Mock
+
+    load_config()
+    error = ProgrammingError(None, None, pyodbc.ProgrammingError("42000", driver_message))
+    monkeypatch.setattr(check_mssql_connection, "get_sqlalchemy_binds", lambda *args: {"vl": None})
+    monkeypatch.setattr(check_mssql_connection, "_check_bind", Mock(side_effect=error))
+    monkeypatch.setattr("sys.argv", ["check_mssql_connection.py", "--bind", "vl"])
+
+    assert check_mssql_connection.main() == 1
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert "sqlstate=42000" in output
+    assert "native_error=17892" in output
+    assert "LOGON trigger" in output
+    assert "CDR administrator" in output
+    assert "private_user" not in output
+    assert "private_db" not in output
+    assert "5701" not in output
+
+
+@pytest.mark.parametrize("original, expected", [
+    (pyodbc.Error(), {}),
+    (pyodbc.Error("42000\nPWD=hidden"), {}),
+    (pyodbc.Error("hidden-password", "private details"), {}),
+    (Exception("42000", "private details"), {}),
+    (pyodbc.Error("28000", "Login failed for private_user. (18456)"), {"sqlstate": "28000"}),
+    (pyodbc.Error("42000", "PWD={secret;value (17892)};UID=private_user; (123456)"),
+     {"sqlstate": "42000"}),
+])
+def test_safe_sql_diagnostics_only_return_valid_states_and_known_codes(original, expected):
+    from scripts import check_mssql_connection
+    from sqlalchemy.exc import DBAPIError
+
+    error = DBAPIError(None, None, original)
+    assert check_mssql_connection._safe_sql_error_details(error) == expected

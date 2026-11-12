@@ -1,9 +1,11 @@
 import os
+import re
 import sys
 import time
 import argparse
 from pathlib import Path
 
+import pyodbc
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import NullPool
@@ -72,16 +74,48 @@ def build_engine_options():
     return options
 
 
+def _safe_sql_error_details(exc):
+    """Return diagnostic codes and fixed hints without echoing driver text."""
+    original = getattr(exc, "orig", None)
+    if not isinstance(original, pyodbc.Error) or not original.args:
+        return {}
+
+    state = original.args[0]
+    if not isinstance(state, str) or not re.fullmatch(r"[A-Z0-9]{5}", state):
+        return {}
+
+    details = {"sqlstate": state}
+    # Only recognise this known code; arbitrary parenthesised numbers in
+    # driver messages can be part of credentials or connection strings.
+    trigger_error = re.compile(
+        r"\[SQL Server\][^\r\n]*?\(17892\)"
+        r"(?:\s+\(SQLDriverConnect\))?(?=; \[|$)"
+    )
+    if state == "42000" and any(
+        isinstance(message, str) and trigger_error.search(message)
+        for message in original.args[1:]
+    ):
+        details.update({
+            "native_error": 17892,
+            "error": "SQL Server rejected the login during LOGON trigger execution",
+            "action": "Ask the CDR administrator to review the LOGON trigger and SQL Server logs",
+        })
+    return details
+
+
 def _check_bind(bind_key, url, engine_options):
     diagnostics = BIND_DIAGNOSTICS[bind_key]
     started = time.perf_counter()
     engine = create_engine(url, **engine_options)
     try:
+        print(f"[{bind_key}] stage=connecting", flush=True)
         with engine.connect() as connection:
+            print(f"[{bind_key}] stage=checking_sql", flush=True)
             select_one = connection.execute(text("SELECT 1")).scalar_one()
             server_name = connection.execute(text("SELECT @@SERVERNAME")).scalar_one()
             service_name = connection.execute(text("SELECT @@SERVICENAME")).scalar_one()
             db_name = connection.execute(text("SELECT DB_NAME()")).scalar_one()
+            print(f"[{bind_key}] stage=counting_rows table=dbo.{diagnostics['table']}", flush=True)
             row_count = connection.execute(
                 text(f"SELECT COUNT_BIG(*) FROM dbo.{diagnostics['table']}")
             ).scalar_one()
@@ -130,7 +164,7 @@ def main():
     print(f"mars={SQL_CONNECTION_OPTIONS.get('MARS_Connection')}")
     print(f"app={SQL_CONNECTION_OPTIONS.get('APP')}")
     print(f"odbc_pooling={SQL_CONNECTION_OPTIONS.get('Pooling')}")
-    print(f"query_timeout={engine_options['connect_args']['timeout']}")
+    print(f"login_timeout={engine_options['connect_args']['timeout']}")
     print(f"pooling_disabled={_env_flag_enabled('SQLALCHEMY_DISABLE_POOLING')}")
 
     ok = True
@@ -147,7 +181,13 @@ def main():
             print(f"[{bind_key}] error_type={exc.__class__.__name__}")
             # Driver exceptions may include the full ODBC string, including
             # credentials with delimiters. Never print their text.
-            print(f"[{bind_key}] error=SQL Server connectivity check failed")
+            details = _safe_sql_error_details(exc)
+            print(f"[{bind_key}] sqlstate={details.get('sqlstate', 'unknown')}")
+            if "native_error" in details:
+                print(f"[{bind_key}] native_error={details['native_error']}")
+            print(f"[{bind_key}] error={details.get('error', 'SQL Server connectivity check failed')}")
+            if "action" in details:
+                print(f"[{bind_key}] action={details['action']}")
 
     return 0 if ok else 1
 

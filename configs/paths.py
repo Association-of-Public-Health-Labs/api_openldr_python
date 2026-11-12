@@ -235,12 +235,14 @@ def get_sqlalchemy_binds(domain, bind_keys=None):
         raise ValueError("Unknown SQL bind; expected: " + ", ".join(_DATABASE_SETTINGS))
 
     settings = {key: _bind_settings(domain, key) for key in keys}
-    missing = list(dict.fromkeys(
-        name
-        for fields in settings.values()
-        for value, name in fields.values()
-        if _missing(value)
-    ))
+    missing = list(
+        dict.fromkeys(
+            name
+            for fields in settings.values()
+            for value, name in fields.values()
+            if _missing(value)
+        )
+    )
     if missing:
         raise ValueError(
             "Missing SQL configuration. Set environment variables or configs.ini: "
