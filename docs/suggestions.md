@@ -52,9 +52,10 @@ ou `email` do token validado. Se não existir email válido nestas fontes, devol
 ## Configuração SMTP
 
 Todas as opções SMTP são lidas em `configs/paths.py`, tal como as restantes
-configurações do projeto. No Windows, preencher a secção `[Email]` já incluída
-em `configs/configs.ini` (modelo em `configs/configs.ini.example`). No Linux,
-definir as variáveis de ambiente de `.env.example` no processo da API:
+configurações do projeto. Tanto no Windows como no Linux, as variáveis de
+ambiente prevalecem sobre a secção `[Email]` de `configs/configs.ini` (modelo
+em `configs/configs.ini.example`). Valores vazios no ambiente também prevalecem.
+Em alternativa ao INI, definir as variáveis de `.env.example` no processo da API:
 
 ```dotenv
 SMTP_HOST=smtp.example.org
@@ -67,7 +68,8 @@ SMTP_USE_SSL=false
 SMTP_TIMEOUT=15
 ```
 
-No Windows, a configuração é lida desta secção de `configs/configs.ini`:
+A configuração INI, usada quando a variável de ambiente não está definida,
+é lida desta secção de `configs/configs.ini` em ambas as plataformas:
 
 ```ini
 [Email]
