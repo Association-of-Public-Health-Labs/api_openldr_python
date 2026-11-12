@@ -1,4 +1,5 @@
 import json
+import logging
 import bcrypt
 from flask_jwt_extended import create_access_token
 from auth.user_model import User, UserLogs
@@ -8,6 +9,8 @@ from db.database import db
 from flask import session
 from configs.paths import *
 # from configs.paths_local import *
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -282,13 +285,30 @@ def delete_user_service(id, current_user=None):
 
 
 def create_user_service(args, id):
+    """Create an account only on behalf of an existing, persisted Admin."""
+    if not id:
+        return _error_response(403, "Forbidden", "Admin permission required")
+    _, error = _check_admin_permission(id)
+    if error:
+        return _error_response(403, "Forbidden", "Admin permission required")
+    return _create_user_record(args)
+
+
+def provision_clerk_user_service(args):
+    """Provision a standard user after the caller verifies the Svix signature.
+
+    This is an internal webhook path, never a bypass selected by public JSON.
+    Clerk data or metadata cannot assign an administrative role here.
     """
-    Create a new user.
-    Note: Logging is handled by the controller (Clerk webhook).
-    
-    Args:
-        args: User data dictionary
-        id: ID of the user performing the action (for audit)
+    if not args.get("user_id"):
+        return _error_response(400, "Bad Request", "User ID is required")
+    return _create_user_record({**args, "role": "user"})
+
+
+def _create_user_record(args):
+    """
+    Persist a user after public authorisation or verified webhook provisioning.
+    Logging of successful Clerk creation is handled by the webhook controller.
     """
     create_username = args.get("username")
     create_first_name = args.get("first_name")
@@ -305,6 +325,11 @@ def create_user_service(args, id):
     ]
     if not all(required_fields):
         return _error_response(400, "Bad Request", "All fields are required")
+
+    roles = {"admin": "Admin", "user": "user"}
+    create_role = roles.get(create_role.strip().lower()) if isinstance(create_role, str) else None
+    if create_role is None:
+        return _error_response(400, "Bad Request", "Role must be Admin or user")
 
     if create_password != create_confirm_password:
         return _error_response(400, "Bad Request", "Passwords do not match")
@@ -335,7 +360,8 @@ def create_user_service(args, id):
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        return _error_response(500, "Internal Server Error", str(e))
+        logger.error("User creation persistence failed (%s)", type(e).__name__)
+        return _error_response(500, "Internal Server Error", "An error occurred")
 
     return {
         "message": "User created successfully",

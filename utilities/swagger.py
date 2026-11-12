@@ -155,7 +155,7 @@ swagger_template = {
             "in": "body",
             "schema": {"$ref": "#/definitions/user_create"},
             "required": True,
-            "description": "Data for creating a new user account. Must be sent over HTTPS.",
+            "description": "Requires a caller with the persisted Admin role. New roles admin/Admin and user/User are normalised to Admin and user. Must be sent over HTTPS.",
         },
         "ProvinceParameter": {
             "name": "province",
@@ -770,7 +770,7 @@ swagger_template = {
                     "maxLength": 100,
                     "format": "password",
                     "example": "newpassword123",
-                    "description": "The new password of the user. Optional. Must be sent over HTTPS.",
+                    "description": "The new password of the user. Required. Must be sent over HTTPS.",
                 },
                 "confirm_password": {
                     "type": "string",
@@ -778,13 +778,13 @@ swagger_template = {
                     "maxLength": 100,
                     "format": "password",
                     "example": "newpassword123",
-                    "description": "The confirmation of the new password. Optional. Must match the password field if provided.",
+                    "description": "The required password confirmation. Must match the password field.",
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["admin", "user"],
+                    "enum": ["Admin", "admin", "user", "User"],
                     "example": "user",
-                    "description": "The role of the user (admin or user).",
+                    "description": "New role, normalised case-insensitively to Admin or user. Only a persisted Admin may assign it.",
                 },
                 "email": {
                     "type": "string",

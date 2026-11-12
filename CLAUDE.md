@@ -343,6 +343,12 @@ Key query builder helpers used across all modules:
   Windows) must equal the signing secret (`whsec_...`) of the Clerk webhook
   endpoint, otherwise the webhook rejects everything with 401.
 - Role-based access: Admin and User roles (`utilities/auth_helpers.py`).
+- Public user creation (`POST /auth/create`) checks the caller's persisted role
+  through `create_user_service`, requiring exactly `Admin`; never trust a role
+  claim to authorise creation. New roles are normalised to `Admin` or `user`.
+  Clerk provisioning uses the separate `provision_clerk_user_service` only after
+  Svix verification, always creating a standard `user`. Do not introduce request
+  fields or a generic flag that bypass the public service's Admin check.
 
 ## Running Locally
 
@@ -517,3 +523,7 @@ database_config.get_sqlalchemy_binds("cdr")
 Use the same configuration loader for every environment. See
 [priority improvement stages](docs/priority-improvements.md) for the branch
 sequence and validation record. Keep unrelated stages out of the active branch.
+From stage 2 onward, create each fix branch from `izi` and merge tested changes
+only into `izi`. The user personally integrates and validates in `dev` before
+the next stage. Preserve unrelated uncommitted work; do not include it in fix
+commits or rewrite the team's history.
