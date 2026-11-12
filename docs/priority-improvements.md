@@ -1,26 +1,32 @@
 # Melhorias prioritárias da API
 
 Plano de execução acordado em 12 de Novembro de 2026, antes da implementação
-de doenças avançadas. Cada etapa parte de `dev`, fica numa branch própria e
-só é integrada após revisão e testes. Não são desenvolvidas etapas em paralelo.
+de doenças avançadas. Não são desenvolvidas etapas em paralelo. A etapa 1 foi
+integrada em `dev` e validada pelo utilizador. A partir da etapa 2, cada branch
+de correcção parte de `izi` e é integrada apenas em `izi`, após revisão e testes.
+O utilizador faz pessoalmente a integração e a validação em `dev` antes da etapa
+seguinte. A integração local não implica publicação no repositório remoto.
 
 | Etapa | Branch | Âmbito | Estado |
 | --- | --- | --- | --- |
-| 1 | `fix/01-database-config` | Configuração SQL e recuperação da suite de testes | Concluída localmente; aguarda validação da equipa |
-| 2 | `fix/02-user-create-permissions` | Autorização para criar utilizadores e atribuir papéis | Por iniciar |
+| 1 | `fix/01-database-config` | Configuração SQL e recuperação da suite de testes | Validada pelo utilizador |
+| 2 | `fix/02-user-create-permissions` | Autorização para criar utilizadores e atribuir papéis | Concluída localmente; aguarda validação do utilizador |
 | 3 | `fix/03-login-credentials` | Login local e credenciais de contas Clerk | Por iniciar |
 | 4 | `fix/04-reporting-errors` | Respostas HTTP de erro dos relatórios e interacção com cache | Por iniciar |
 | 5 | `fix/05-patient-log-privacy` | Protecção de dados de pacientes nos logs de erro | Por iniciar |
 
 ## Critérios por etapa
 
-1. Confirmar que `dev` e a worktree de trabalho não contêm alterações alheias.
+1. Identificar e preservar alterações locais da equipa em `izi`; criar a branch
+   de correcção numa worktree isolada, a partir do último commit de `izi`.
 2. Implementar apenas a correcção da etapa, com testes de regressão e documentação.
 3. Executar os testes afectados e depois a suite completa, sem ligações externas.
 4. Rever o diff, verificar que não contém segredos e criar um commit identificável.
-5. Integrar em `dev` apenas com os testes verdes e preservar a branch da melhoria.
-6. Validar em `dev` antes de iniciar a etapa seguinte. Publicação remota e
-   validação com SQL Server têm de ser identificadas separadamente nos resultados.
+5. Integrar apenas em `izi`, com os testes verdes, preservando a branch da
+   melhoria e as alterações locais identificadas. Verificar a integração.
+6. Aguardar a integração pessoal e validação do utilizador em `dev` antes de
+   iniciar a etapa seguinte. Publicação remota e validação com SQL Server têm
+   de ser identificadas separadamente nos resultados.
 
 ## Etapa 1 — Configuração SQL
 
@@ -77,5 +83,63 @@ faz consultas de leitura e não foi executado nesta etapa local.
 
 ### Próximas etapas
 
-Os problemas de autenticação, respostas de erro e logs continuam pendentes até
-às etapas correspondentes. Esta etapa não implementa CD4, CrAg ou TB-LAM.
+Os problemas de autenticação, respostas de erro e logs são tratados nas etapas
+correspondentes. Esta etapa não implementa CD4, CrAg ou TB-LAM.
+
+## Etapa 2 — Autorização para criar utilizadores
+
+Branch: `fix/02-user-create-permissions`, criada a partir de `izi` no commit
+`2887e1d`. Destino de integração: `izi`. A branch `dev` é gerida pelo utilizador.
+
+### Situação inicial
+
+O endpoint público exigia um JWT, mas o serviço de criação ignorava a identidade
+do operador e gravava o papel recebido. Um utilizador comum conseguia criar uma
+conta Admin. O mesmo serviço era usado pelo webhook, pelo que acrescentar uma
+verificação Admin indiscriminadamente impediria o provisionamento Clerk.
+
+### Alteração e compatibilidade
+
+- A criação pública exige um operador persistido com papel exactamente `Admin`.
+  Claims do JWT não substituem a consulta ao cadastro. Identidades ausentes,
+  desconhecidas ou com outro papel são rejeitadas sem criar contas.
+- Novas contas aceitam os papéis Admin e user, normalizados sem distinguir
+  maiúsculas/minúsculas; papéis desconhecidos devolvem 400. Contas existentes
+  não são alteradas nem migradas.
+- O endpoint devolve os códigos HTTP reais 400/403/500 nas falhas de criação e
+  conserva HTTP 200 e o payload de sucesso. O texto de excepções não é exposto.
+- O provisionamento Clerk tem um serviço interno separado, chamado depois da
+  verificação Svix, e força sempre o papel `user`. Não existe um parâmetro do
+  endpoint público que dispense a autorização. Erros de provisionamento não
+  são anunciados nem registados como criações bem-sucedidas.
+- O fluxo de login, as credenciais Clerk e os restantes endpoints CRUD ficam
+  fora desta etapa. A verificação histórica de duplicados também é preservada;
+  esta correcção trata de autorização e atribuição de papéis na criação.
+
+### Validação
+
+Validação concluída na branch isolada:
+
+| Verificação | Resultado |
+| --- | --- |
+| Primeira execução dos testes novos, antes da correcção | 32 falhas, 21 sucessos |
+| Criação, webhook, autenticação e geração de Swagger | 101 sucessos |
+| Suite completa | 1 280 sucessos, 1 ignorado, nenhuma falha |
+| Revisão independente do código e documentação | Sem bloqueios identificados |
+| Verificação do diff | `git diff --check` sem erros |
+
+Os 43 novos casos de regressão demonstram a autorização com cadastro real em
+SQLite, o bloqueio de tentativas de bypass e a preservação do provisionamento.
+Comandos de reprodução:
+
+```powershell
+python -m pytest tests/test_user_creation.py tests/test_clerk_webhook.py tests/test_auth_enforcement.py tests/test_swagger_docstrings.py -q
+python -m pytest -q
+git diff --check
+```
+
+A worktree inicial de `izi` contém alterações de configuração SQL, diagnóstico,
+testes e uma linha do README. Estas alterações pertencem à equipa e ficam fora
+do commit da etapa 2. A integração deve preservá-las e os testes finais devem
+avaliar a cópia integrada. Os testes de autorização usam SQLite em memória e
+pedidos assinados de teste, sem SQL Server nem chamadas reais ao Clerk.

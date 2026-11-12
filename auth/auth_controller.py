@@ -8,6 +8,7 @@ from auth.auth_service import (
     update_user_service,
     delete_user_service,
     create_user_service,
+    provision_clerk_user_service,
     logout_user_service,
     get_user_by_id_service,
     save_user_log_service,
@@ -47,6 +48,16 @@ def _success_response(message: str, data: dict = None):
     if data is not None:
         response["data"] = data
     return jsonify(response)
+
+
+def _creation_error_response(result):
+    """Map creation errors to HTTP status without leaking server details."""
+    status = result.get("code", result.get("status"))
+    if isinstance(status, int) and 400 <= status <= 599:
+        if status >= 500:
+            result = {"status": status, "error": "Internal Server Error", "message": "An error occurred"}
+        return result, status
+    return None
 
 
 def _get_clerk_headers():
@@ -264,8 +275,9 @@ class user_create_controller(Resource):
     @jwt_required()
     def post(self):
         """
-        Handle POST request for user creation.
-        Expects 'username', 'password', 'confirm_password', 'email', and 'role' in the request body.
+        Create a user on behalf of a persisted Admin.
+        The caller's stored role must be exactly Admin; JWT role claims do not grant access.
+        New roles are normalised to Admin or user. Clerk provisioning uses a separate signed webhook.
         ---
         tags:
             - Authentication
@@ -276,15 +288,19 @@ class user_create_controller(Resource):
                 description: Returns a success message if user is created successfully.
             400:
                 description: Invalid Parameters
+            401:
+                description: Missing or expired API JWT
             403:
-                description: Forbidden
+                description: Caller has no local account with the Admin role
+            422:
+                description: Malformed API JWT
             500:
                 description: An Error Occurred
         """
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _error_response(401, "Unauthorized", "User not authenticated")
+            return _creation_error_response({"status": 401, "error": "Unauthorized", "message": "User not authenticated"})
 
         parser = reqparse.RequestParser()
         parser.add_argument("username", required=True)
@@ -297,9 +313,14 @@ class user_create_controller(Resource):
         args = parser.parse_args()
 
         try:
-            return jsonify(create_user_service(args, current_user))
+            result = create_user_service(args, current_user)
+            error = _creation_error_response(result)
+            if error is not None:
+                return error
+            return jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("User creation failed (%s)", type(e).__name__)
+            return _creation_error_response({"status": 500})
 
 
 class clerk_user_controller(Resource):
@@ -451,9 +472,16 @@ class clerk_user_controller(Resource):
         )
 
     def _create_new_user_from_clerk(self, user_id: str, clerk_data: dict):
-        """Create a new user from Clerk data."""
+        """Provision a standard user after the webhook signature is verified."""
         args = _build_user_args_from_clerk(user_id, clerk_data)
-        user_create = create_user_service(args, user_id)
+        try:
+            user_create = provision_clerk_user_service(args)
+        except Exception as exc:
+            logger.error("Clerk user provisioning failed (%s)", type(exc).__name__)
+            return _creation_error_response({"status": 500})
+        error = _creation_error_response(user_create)
+        if error is not None:
+            return error
 
         user_data = {
             "user_id": user_id,

@@ -445,8 +445,8 @@ curl -H "Authorization: Bearer eyJhbGciOi..." \
 
 The API supports [Clerk](https://clerk.com/) as an external identity provider via webhook events at `/auth/clerk`. When a user authenticates through Clerk:
 
-1. **New users** are automatically created in the local database
-2. **Existing users** receive a new JWT access token
+1. **New users** are provisioned in the local database with the standard `user` role, after Svix signature verification
+2. **Existing users** have their session recorded; the webhook never issues an API access token
 3. **User updates/deletions** from Clerk are synced to the local database
 4. All events are logged to the `UserLogs` table
 
@@ -454,6 +454,27 @@ The API supports [Clerk](https://clerk.com/) as an external identity provider vi
 
 - **Admin** — Full access to all endpoints, including patient data and user management
 - **user** — Standard access (default role for Clerk-provisioned users)
+
+### Creating users
+
+`POST /auth/create` requires an API JWT and an existing caller whose stored role
+is exactly `Admin`. A role claimed in the JWT or supplied in the request does
+not grant this permission. Missing local accounts and other stored roles are
+rejected with HTTP 403 before any user is created.
+
+The existing required fields remain `username`, `first_name`, `last_name`,
+`password`, `confirm_password`, `email` and `role`. New roles are normalised:
+`admin`/`Admin` become `Admin`, and `user`/`User` become `user`; comparison is
+case-insensitive and surrounding whitespace is ignored. Unsupported roles and
+invalid creation data return HTTP 400. Existing stored roles are unchanged.
+Successful creation retains HTTP 200 and the existing response payload.
+Unexpected creation failures return HTTP 500 with a generic message.
+
+The signed Clerk webhook uses a separate internal provisioning service that
+always assigns `user`, without requiring an existing local Admin. The public
+creation endpoint cannot select this path through request fields. The local
+login and Clerk credential changes are tracked separately as stage 3 in the
+[priority improvement record](docs/priority-improvements.md).
 
 ## Getting Started
 

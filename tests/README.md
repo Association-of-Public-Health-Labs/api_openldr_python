@@ -52,8 +52,19 @@ python -m pytest tests/test_database_config.py tests/tb/test_tb_cultura_api_modu
 These cover environment/INI precedence on Windows and Linux, literal and escaped
 credentials, validation of selected binds, independent ReportData settings,
 pooling and safe connection diagnostics. The complete suite must pass before
-integrating a priority improvement into `dev`; see the
+integrating a priority improvement into `izi`; the user then integrates and
+validates it in `dev`. See the
 [stage record](../docs/priority-improvements.md).
+
+User-creation authorisation and signed Clerk provisioning regressions:
+
+```powershell
+python -m pytest tests/test_user_creation.py tests/test_clerk_webhook.py tests/test_auth_enforcement.py -q
+```
+
+These verify stored Admin permissions, rejected privilege claims, supported
+creation roles, real HTTP errors and standard-role provisioning after Svix
+verification. They use isolated SQLite data and mocked Clerk fetches.
 
 ```powershell
 # everything
