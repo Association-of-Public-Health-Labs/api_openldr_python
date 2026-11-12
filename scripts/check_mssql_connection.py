@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import time
 import argparse
@@ -15,7 +14,7 @@ from configs.paths import (  # noqa: E402
     CDR_DOMAIN_NAME,
     DPI_DATABASE_DATABASE,
     SQL_CONNECTION_OPTIONS,
-    SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ,
+    get_sqlalchemy_binds,
     TBDATA_DATABASE_DATABASE,
     VIRALLOADDATA_DATABASE,
 )
@@ -35,13 +34,6 @@ BIND_DIAGNOSTICS = {
         "table": "TBMaster",
     },
 }
-
-
-def _sanitize_error(value):
-    message = str(value)
-    message = re.sub(r"(PWD|Password)=([^;'\"]+)", r"\1=***", message, flags=re.IGNORECASE)
-    message = re.sub(r"(UID|User ID)=([^;'\"]+)", r"\1=***", message, flags=re.IGNORECASE)
-    return message
 
 
 def _env_flag_enabled(name):
@@ -120,6 +112,11 @@ def main():
 
     engine_options = build_engine_options()
     bind_keys = list(BIND_DIAGNOSTICS) if args.bind == "all" else [args.bind]
+    try:
+        binds = get_sqlalchemy_binds("cdr", bind_keys)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     print("OpenLDR MSSQL connectivity check")
     print(f"host={CDR_DOMAIN_NAME}")
@@ -141,14 +138,16 @@ def main():
         try:
             _check_bind(
                 bind_key,
-                SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ[bind_key],
+                binds[bind_key],
                 engine_options,
             )
         except SQLAlchemyError as exc:
             ok = False
             print(f"[{bind_key}] status=failed")
             print(f"[{bind_key}] error_type={exc.__class__.__name__}")
-            print(f"[{bind_key}] error={_sanitize_error(exc)}")
+            # Driver exceptions may include the full ODBC string, including
+            # credentials with delimiters. Never print their text.
+            print(f"[{bind_key}] error=SQL Server connectivity check failed")
 
     return 0 if ok else 1
 

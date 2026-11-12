@@ -22,6 +22,7 @@ A RESTful API for epidemiological and laboratory reporting, with endpoints for T
 - [Deployment](#deployment)
 - [Environment Setup](#environment-setup)
 - [Testing](#testing)
+- [Priority improvement stages](docs/priority-improvements.md)
 - [Troubleshooting](#troubleshooting)
 - [Error Handling](#error-handling)
 
@@ -486,10 +487,10 @@ The API supports [Clerk](https://clerk.com/) as an external identity provider vi
 
 4. Configure the application:
    - Configuration is loaded from `configs/paths.py`.
-   - **Windows**: values are read from `configs/configs.ini`.
-   - **Linux**: values are read from environment variables.
-   - In `app.py`, choose the active SQLAlchemy bind dictionary (currently `SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ`).
-   - Ensure `FLASK_SECRET_KEY` (Linux) or `Flask.secret_key` (Windows), database credentials, and Clerk settings are configured.
+   - On Windows and Linux, process environment variables override `configs/configs.ini`; the INI supplies unset values.
+   - Copy `configs/configs.ini.example` to `configs/configs.ini` or set the variables listed in `.env.example` in the service/container environment.
+   - The app uses `get_sqlalchemy_binds("cdr")` and validates the active SQL configuration before creating its engines.
+   - Ensure the Flask secret, database credentials, and Clerk settings are configured. Python does not automatically load `.env` files.
 
 5. Run the application:
    ```bash
@@ -521,36 +522,39 @@ docker-compose up --build -d
 
 ## Environment Setup
 
-### Windows configuration (`configs.ini`)
+### Configuration sources (Windows and Linux)
 
-On Windows, `configs/paths.py` reads settings from `configs/configs.ini`.
+`configs/paths.py` reads process environment variables first, then `configs/configs.ini`, then the setting's default. This order applies to SQL, Flask, Clerk and SMTP settings on both platforms. INI values are literal, including `%` in passwords. An explicitly empty environment variable overrides the INI; a required SQL value left empty causes a configuration error.
 
-Set at least:
+Use `configs/configs.ini.example` for the INI keys and `.env.example` for environment names. The Python application does not load `.env` automatically. Docker Compose reads it when configured through `env_file`; for Waitress/NSSM set service environment variables or fill the INI and restart the service.
 
-- `Flask.secret_key`
-- `Domains.local`, `Domains.cdr`, `Domains.cloud`, `Domains.tb`
-- `Databases.database_user`, `Databases.database_password`
-- `Databases.ViralLoadData`, `Databases.Dpi`, `Databases.HivAdvancedDisease`, `Databases.TBData`, `Databases.Dictionary`, `Databases.Users`, `Databases.ReportData`
-- `Schemas.cdr_schema`
-- `Clerk.clerk_webhook_secret`, `Clerk.secret_key`, `Clerk.api_endpoint`, `Clerk.clerk_jwts_url`, `Clerk.clerk_issuer`, `Clerk.clerk_public_key`
+The CDR configuration used by `app.py` requires:
 
-`Databases.ReportData` / `DB_REPORT_DATA` is the ReportData database (weekly VL lab reports, table `Resume`); same SQL Server host and credentials as the other databases. The weekly report endpoints need it.
+| Environment variable | INI section/key |
+| --- | --- |
+| `CDR_DOMAIN` | `[Domains] cdr` |
+| `DB_USER`, `DB_PASSWORD` | `[Databases] database_user`, `database_password` |
+| `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD` | `[Databases] ViralLoadData`, `Dpi`, `HivAdvancedDisease` |
+| `DB_TB_DATA`, `DB_DICT`, `DB_USERS` | `[Databases] TBData`, `Dictionary`, `Users` |
+| `DB_REPORT_DATA` | `[Databases] ReportData` |
 
-For a named SQL Server instance, `Domains.cdr` can include the instance name, for example `disamoz.org.mz\SQLEXPRESS` or `CDR\SQLEXPRESS`.
+Set the Flask secret and the Clerk/SMTP settings required by the enabled features too. Unused local/cloud hosts do not need to be configured for CDR startup.
 
-### Linux configuration (environment variables)
+`get_sqlalchemy_binds("cdr")` validates all seven CDR binds before engines are created. Tools can select fewer, for example `get_sqlalchemy_binds("cdr", ["vl"])`. Supported environments are `local`, `cdr` and `cloud`. Errors identify missing setting names without printing credentials. The historical `SQLALCHEMY_BINDS_*` dictionaries remain available and contain only completely configured binds; application startup and the connection checker use the validated getter.
 
-On Linux, `configs/paths.py` reads environment variables.
+### ReportData and SQL Server hosts
 
-Common variables:
+`DB_REPORT_DATA` / `[Databases] ReportData` selects the reporting database, including the weekly VL `Resume` table. It can use its own server and login:
 
-- `FLASK_SECRET_KEY`
-- `LOCAL_DOMAIN`, `CDR_DOMAIN`, `CLOUD_DOMAIN`, `TB_DASHBOARD_DOMAIN`
-- `DB_USER`, `DB_PASSWORD`, `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS`, `DB_REPORT_DATA`
-- `SCHEMA_CDR`
-- `CLERK_WEBHOOK_SECRET_KEY`, `CLERK_SECRET_KEY`, `CLERK_API_URL`, `CLERK_JWTS_URL`, `CLERK_ISSUER`, `CLERK_PUBLIC_KEY`
+| Environment variable | INI section/key | Empty or unset value |
+| --- | --- | --- |
+| `REPORT_DATA_HOST` | `[Databases] report_data_host` | Selected environment's host |
+| `REPORT_DATA_USER` | `[Databases] report_data_user` | `DB_USER` / `database_user` |
+| `REPORT_DATA_PASSWORD` | `[Databases] report_data_password` | `DB_PASSWORD` / `database_password` |
 
-For Coolify/Docker deployments that use the CDR SQL Server named instance, set `CDR_DOMAIN` to `disamoz.org.mz\SQLEXPRESS` when connecting from outside the server network, or `CDR\SQLEXPRESS` when the container can resolve the internal host. If SQLEXPRESS is configured with a fixed TCP port, use `host,port` instead, for example `disamoz.org.mz,14330`, and do not include `\SQLEXPRESS`.
+These three optional overrides keep their existing fallback behaviour. Selecting only `reportData` with its own host and credentials does not require the main SQL settings.
+
+For a named instance, use `sql.example.test\SQLEXPRESS`. For a fixed TCP port, use `tcp:sql.example.test,1433` without the instance suffix. The configured hostname must resolve from the service/container network.
 
 ### Database/driver notes
 
@@ -559,9 +563,11 @@ For Coolify/Docker deployments that use the CDR SQL Server named instance, set `
 - ODBC encryption is enabled with `Encrypt=yes` and `TrustServerCertificate=yes`.
 - MARS is disabled with `MARS_Connection=No`.
 - The application name sent to SQL Server is `OpenLDR API`.
-- ODBC pooling is not disabled by default. For diagnostics only, set `SQL_ODBC_POOLING=false` to add `Pooling=No` to the ODBC connection string.
-- SQLAlchemy pooling stays enabled by default with `pool_pre_ping=True`, `pool_recycle=1800`, and a command timeout from `SQL_QUERY_TIMEOUT` (default `180`). For diagnostics only, set `SQLALCHEMY_DISABLE_POOLING=true` to use `NullPool`.
-- Test the active CDR bind with `python scripts/check_mssql_connection.py`. The script prints `@@SERVERNAME`, `@@SERVICENAME`, and `DB_NAME()` without printing credentials.
+- ODBC values containing delimiters, braces or surrounding spaces are escaped while preserving their contents.
+- ODBC pooling is enabled by default. For diagnostics, `SQL_ODBC_POOLING=false` sets the process-wide `pyodbc.pooling` before connections are opened. No `Pooling` or `Connection Timeout` attribute is added to the ODBC string.
+- SQLAlchemy pooling is independent and stays enabled by default with `pool_pre_ping=True` and `pool_recycle=1800`. Set `SQLALCHEMY_DISABLE_POOLING=true` to use `NullPool`.
+- The existing `SQL_QUERY_TIMEOUT` variable (default `180`) is passed to `pyodbc.connect(timeout=...)` through SQLAlchemy. It controls connection/login timeout, despite its historical name; it does not configure statement execution timeout.
+- Check the selected CDR databases with `python scripts/check_mssql_connection.py --bind vl` (or `--bind all` for VL, EID and TB). The script validates configuration first, then reads server identity and row counts. It prints error classes without driver exception text or credentials; failures return exit code 1.
 - Confirm network access to the configured SQL Server hosts.
 
 ## Testing
@@ -570,14 +576,19 @@ The repository includes pytest tests in `tests/`.
 
 ```bash
 # Unit-style utility tests
-pytest tests/test_utils.py
+python -m pytest tests/test_utils.py
+
+# SQL configuration and application route registration (no SQL Server needed)
+python -m pytest tests/test_database_config.py tests/tb/test_tb_cultura_api_module.py -q
 
 # Full test suite
-pytest tests -q
+python -m pytest -q
 
 # Optional live integration checks (requires DB connectivity)
-pytest tests/test_hiv_endpoints.py -s
+python tests/test_hiv_endpoints.py
 ```
+
+The pytest suite excludes the standalone live script and uses mocks/SQLite; passing it does not verify SQL Server connectivity or production indicator values. See [priority improvement stages](docs/priority-improvements.md) for the per-branch validation record.
 
 ## Troubleshooting
 
