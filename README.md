@@ -2,6 +2,13 @@
 
 A RESTful API for epidemiological and laboratory reporting, with endpoints for Tuberculosis (TB) GeneXpert, HIV Viral Load (VL), HIV EID, dictionary data, and user authentication.
 
+**Current code version: 2.0.0.** The release number and highlights are displayed in
+Swagger at `/apidocs/` and in `info.version` at `/apispec_1.json`. See the
+[changelog](CHANGELOG.md) for changes and compatibility notes. Production rollout
+requires SQL Server migration validation and application of the
+[user deactivation migration](sql/auth/001_add_user_is_active.sql) before deploying
+the new API version; see the [deployment guide](docs/user-deactivation.md).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -14,6 +21,7 @@ A RESTful API for epidemiological and laboratory reporting, with endpoints for T
   - [HIV Viral Load Endpoints](#hiv-viral-load-endpoints)
   - [HIV EID Endpoints](#hiv-eid-endpoints)
   - [Dictionary Endpoints](#dictionary-endpoints)
+- [Release history and versioning](CHANGELOG.md)
 - [Common Parameters](#common-parameters)
 - [Pagination](#pagination)
 - [Authentication](#authentication)
