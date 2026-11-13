@@ -164,8 +164,10 @@ def test_http_denies_unknown_identity_even_with_admin_claim(client, user_args):
     response = client.post(CREATE_URL, json=user_args,
                            headers=jwt_headers("deleted-user", role="Admin"))
 
-    assert response.status_code == 403
-    assert response.get_json() == FORBIDDEN
+    assert response.status_code == 401
+    assert response.get_json() == {
+        "status": 401, "error": "Unauthorized", "message": "User not authenticated",
+    }
     assert_no_created_user()
 
 
@@ -223,11 +225,12 @@ def test_http_creation_validation_returns_400_without_writes(client, user_args, 
 @pytest.mark.parametrize("status,error", [(400, "Bad Request"), (403, "Forbidden"),
                                          (500, "Internal Server Error")])
 def test_http_creation_uses_service_error_status(client, user_args, status, error):
+    actor = persist_actor()
     message = "private-sql SELECT password FROM users" if status == 500 else "Creation failed"
     body = {"status": status, "error": error, "message": message}
     with patch("auth.auth_controller.create_user_service", return_value=body):
         response = client.post(CREATE_URL, json=user_args,
-                               headers=jwt_headers("actor-admin"))
+                               headers=jwt_headers(actor.user_id))
 
     assert response.status_code == status
     if status == 500:
@@ -237,7 +240,7 @@ def test_http_creation_uses_service_error_status(client, user_args, status, erro
         assert message not in response.get_data(as_text=True)
     else:
         assert response.get_json() == body
-    assert_no_created_user()
+    assert_no_created_user(actor_count=1)
 
 
 @pytest.mark.parametrize("token_kind,expected_status", [("missing", 401), ("expired", 401),
@@ -260,7 +263,7 @@ def test_http_creation_rejects_invalid_auth_before_service(client, user_args,
 
 def test_http_creation_lookup_error_fails_closed_without_details(client, user_args, caplog):
     private_detail = "private-sql SELECT password FROM users; actor@example.test"
-    with patch("auth.auth_service.get_user_by_id_service",
+    with patch("auth.auth_controller.get_user_by_id_service",
                side_effect=RuntimeError(private_detail)):
         response = client.post(CREATE_URL, json=user_args,
                                headers=jwt_headers("actor-admin"))

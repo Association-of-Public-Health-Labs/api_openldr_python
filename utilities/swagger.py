@@ -820,13 +820,14 @@ swagger_template = {
         "user_deletion": {
             "type": "object",
             "required": ["user_id"],
+            "description": "Active Admin only. Logically deactivate the account, preserving its row and audit history. Repeated requests keep the first updated_at and do not add another transition audit. Existing JWTs are refused on the next protected request.",
             "properties": {
                 "user_id": {
                     "type": "string",
                     "minLength": 6,
-                    "maxLength": 100,
+                    "maxLength": 50,
                     "example": "1234567890",
-                    "description": "The ID of the user to delete.",
+                    "description": "The user_id (NVARCHAR(50)) of the account to deactivate.",
                 },
             },
         },

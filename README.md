@@ -120,8 +120,8 @@ See [Doubts and suggestions](docs/suggestions.md) for the payload, authenticatio
 | `POST` | `/auth/login` | Login with username or email and local password, returns JWT token | No |
 | `POST` | `/auth/create` | Create a new user (Admin only) | Yes (JWT) |
 | `PUT` | `/auth/update` | Update user details (Admin only) | Yes (JWT) |
-| `DELETE` | `/auth/delete` | Delete a user (Admin only) | Yes (JWT) |
-| `GET` | `/auth/users` | Get all users (Admin only) | Yes (JWT) |
+| `DELETE` | `/auth/delete` | Logically deactivate a user (active Admin only) | Yes (JWT) |
+| `GET` | `/auth/users` | List active users (active Admin only) | Yes (JWT) |
 | `POST` | `/auth/clerk` | Clerk webhook handler for external auth events | No (Webhook) |
 
 #### Clerk Webhook Events
@@ -132,7 +132,7 @@ The `/auth/clerk` endpoint handles the following Clerk events:
 - **`session.removed`** / **`session.ended`** — Logs out the user
 - **`user.created`** — Creates a new user from Clerk data
 - **`user.updated`** — Updates user info from Clerk data
-- **`user.deleted`** — Deletes the user
+- **`user.deleted`** — Logically deactivates the local user, preserving history
 
 ### Tuberculosis GeneXpert Endpoints
 
@@ -461,9 +461,9 @@ curl -H "Authorization: Bearer eyJhbGciOi..." \
 The API supports [Clerk](https://clerk.com/) as an external identity provider via webhook events at `/auth/clerk`. When a user authenticates through Clerk:
 
 1. **New users** are provisioned in the local database with the standard `user` role, after Svix signature verification
-2. **Existing users** have their session recorded; the webhook never issues an API access token
-3. **User updates/deletions** from Clerk are synced to the local database
-4. All events are logged to the `UserLogs` table
+2. **Existing active users** have their session recorded; the webhook never issues an API access token
+3. **User updates/deletions** from Clerk are synced without reactivating disabled local accounts
+4. Successful events use `UserLogs`; deactivation and its audit share one transaction and are recorded once per state change
 
 Clerk RS256 bearer tokens and Svix webhook verification remain independent of
 local password login. Local login does not call Clerk. New Clerk accounts are
@@ -495,10 +495,10 @@ documentation; access to the documented data is enforced separately.
 
 ### Creating users
 
-`POST /auth/create` requires an API JWT and an existing caller whose stored role
+`POST /auth/create` requires an API JWT and an active caller whose stored role
 is exactly `Admin`. A role claimed in the JWT or supplied in the request does
-not grant this permission. Missing local accounts and other stored roles are
-rejected with HTTP 403 before any user is created.
+not grant this permission. Missing/inactive local accounts return HTTP 401;
+other stored roles return HTTP 403 before any user is created.
 
 The existing required fields remain `username`, `first_name`, `last_name`,
 `password`, `confirm_password`, `email` and `role`. Supported roles are `Admin`,
@@ -516,6 +516,35 @@ roles through `PUT /auth/update` while omitting both password fields to keep the
 existing password. The local
 login and Clerk credential validation is recorded as stage 3 in the
 [priority improvement record](docs/priority-improvements.md).
+
+### Deactivating users
+
+Apply the [SQL Server 2014 migration](sql/auth/001_add_user_is_active.sql) manually
+**before deploying this API version**, then run the
+[read-only verification](sql/auth/002_verify_user_is_active.sql). It adds
+`Utils.dbo.openldr_api_user_users.is_active BIT NOT NULL` with
+`DF_openldr_api_user_users_is_active DEFAULT (1)`. Existing accounts become
+active on first application; reapplying preserves saved inactive states and
+timestamps. The model uses the declared `user_id NVARCHAR(50)` primary key,
+retains the legacy numeric `id` and maps `is_active` to a boolean.
+
+`DELETE /auth/delete` keeps its existing Admin permission, HTTP 200 and success
+payload, including the legacy message `User deleted successfully`. It now sets
+`is_active = 0` and `updated_at` only where the target `user_id` is active. A retry
+by an active Admin succeeds without changing that timestamp or adding another
+transition audit. No row or audit history is physically removed.
+
+Password login accepts active accounts only and uses the same generic 401 for
+inactive/invalid credentials. Every protected request rechecks account existence
+and state in the database, before report cache or business services. API and
+Clerk JWTs issued before deactivation are refused on the next request after
+commit. There is no local refresh endpoint; refresh tokens cannot be used as
+access tokens. Operational lists/lookups hide inactive accounts; internal
+history lookups may explicitly include them without exposing a public bypass.
+
+The [deactivation and deployment guide](docs/user-deactivation.md) contains the
+file inventory, audit behaviour, tests, SQL Server validation still required,
+and the publication order. No production migration is executed automatically.
 
 ## Getting Started
 
