@@ -6,16 +6,17 @@ integrada em `dev` e validada pelo utilizador. A partir da etapa 2, cada branch
 de correcção parte de `izi` e é integrada apenas em `izi`, após revisão e testes.
 O utilizador faz pessoalmente a integração e a validação em `dev` antes da etapa
 seguinte. A integração local não implica publicação no repositório remoto.
-Na revisão actual da etapa 3, pediu trabalho directamente em `izi`, preservando
-as suas alterações de login e deixando o commit para execução manual.
+A revisão da etapa 3 foi feita directamente em `izi`, preservando as alterações
+de login do utilizador e deixando-lhe o commit manual. A etapa 4 retoma o fluxo
+de branch isolada e integração em `izi` depois dos testes.
 
 | Etapa | Branch | Âmbito | Estado |
 | --- | --- | --- | --- |
 | 1 | `fix/01-database-config` | Configuração SQL e recuperação da suite de testes | Validada pelo utilizador |
 | 2 | `fix/02-user-create-permissions` | Autorização para criar utilizadores e atribuir papéis | Concluída localmente; aguarda validação do utilizador |
 | 2B | `feat/02-dashboard-roles` | Papéis de leitura por subdivisão e gestão das atribuições | Concluída localmente; aguarda validação do utilizador |
-| 3 | `izi`, revisão local sem commit por pedido do utilizador | Login local e credenciais de contas Clerk | Testes locais aprovados; falta validação pessoal da password real |
-| 4 | `fix/04-reporting-errors` | Respostas HTTP de erro dos relatórios e interacção com cache | Por iniciar |
+| 3 | `izi`, commit manual `9c5fa0b` | Login local e credenciais de contas Clerk | Guardada pelo utilizador; etapa seguinte autorizada |
+| 4 | `fix/04-reporting-errors` | Respostas HTTP de erro dos relatórios e interacção com cache | Testes locais aprovados; destino de integração `izi` |
 | 5 | `fix/05-patient-log-privacy` | Protecção de dados de pacientes nos logs de erro | Por iniciar |
 
 ## Critérios por etapa
@@ -284,4 +285,85 @@ real dessa conta nem emitido um token em seu nome. Não foram consultados os
 relatórios clínicos reais. Antes de avançar para a etapa seguinte, o utilizador
 deve confirmar o login com a sua password no ambiente configurado e o acesso
 a um relatório VL e a uma subdivisão proibida. O código fica localmente em
-`izi`, sem staging nem commit, para essa validação e commit manual.
+`izi`, sem staging nem commit, para essa validação e commit manual. Em 13 de
+Novembro, o cadastro Git confirmou o commit manual `9c5fa0b`, e o utilizador
+solicitou o avanço para a etapa 4. O agente não realizou nova validação da
+password real ou dos indicadores SQL.
+
+## Etapa 4 — Erros HTTP e cache
+
+Branch `fix/04-reporting-errors`, criada numa worktree isolada em 13 de Novembro
+de 2026 a partir de `izi` no commit `9c5fa0b`. A cópia inicial estava limpa.
+Destino de integração local: apenas `izi`. A validação e integração em `dev`
+continuam a pertencer ao utilizador; não é feito push automático.
+
+### Problemas reproduzidos
+
+A pipeline já convertia muitos erros dos serviços em códigos HTTP reais. A
+revisão encontrou falhas residuais concretas, sem necessitar de alterar as
+consultas dos indicadores:
+
+- Respostas 5xx eliminavam `error`, mas conservavam campos arbitrários como
+  `details`, `trace` ou `data`, permitindo publicar detalhes internos.
+- `HTTPException` 500/503 era relançada com descrições potencialmente internas.
+- Um ficheiro de cache com um erro de serviço podia ser servido como HTTP 200.
+  JSON não objecto, timestamp inválido ou envelope sem dados podiam interromper
+  o relatório. Falhas de lookup/escrita também escapavam ao tratamento comum.
+- As seis rotas de dicionários devolviam HTTP 200 e o texto da excepção quando
+  a consulta falhava. Falhas na escrita atómica do cache podiam deixar `.tmp`,
+  incluindo um descritor aberto que impedia a remoção no Windows.
+
+### Alterações e compatibilidade
+
+- A resposta 5xx contém apenas `status`, `code` e a mensagem fixa
+  `An error occurred`. O código declarado é preservado, incluindo 503; excepções
+  inesperadas e códigos de erro inválidos dão 500. Contratos 4xx, parsing,
+  listas de sucesso, paginação e resultados vazios são preservados.
+- Os seis GET de dicionários usam a pipeline comum, com uma única consulta ao
+  papel, preservando filtros e permissões. Excepções passam a HTTP 500 genérico;
+  os dicionários continuam sem cache. Swagger documenta este comportamento.
+- Entradas do cache exigem chave correspondente e válida, dados de sucesso,
+  timestamp com timezone, não futuro e dentro do prazo. Erros, corrupção e
+  falhas de acesso são tratados como ausência de cache e o relatório é calculado.
+  Se esse relatório falhar, o cliente recebe o erro actual, sem fallback expirado.
+- Apenas sucessos são gravados. Falhas de serialização, abertura ou substituição
+  preservam a entrada anterior e removem o temporário. O warm-up ignora entradas
+  inválidas e mantém chaves antigas válidas para recomputação.
+- Não mudam as janelas, TTL padrão, chaves das entradas válidas, consultas SQL,
+  papéis, login ou autenticação Clerk. A autorização continua anterior ao cache.
+  Não são necessárias migrações ou uma limpeza geral do cache.
+
+O [contrato de erros e cache](reporting-errors-and-cache.md), o README, a
+[matriz de acesso](access-control.md) e o Swagger foram actualizados. A etapa 5,
+relativa aos dados de pacientes nos logs, permanece separada e por iniciar.
+
+### Validação
+
+| Verificação | Resultado |
+| --- | --- |
+| Contrato HTTP antes da correcção | 54 falhas, 42 sucessos |
+| Cache antes da correcção inicial | 40 falhas, 6 sucessos |
+| Excepções nas seis rotas de dicionários antes da correcção | 6 falhas |
+| Novas regressões de contrato HTTP | 96 sucessos |
+| Cache existente e novas regressões, incluindo falha de abertura no Windows | 93 sucessos |
+| Novas regressões de dicionários | 54 sucessos |
+| Conjunto dirigido, incluindo permissões e Swagger | 387 sucessos |
+| Suite completa na branch da etapa | 2 325 sucessos, 1 ignorado, nenhuma falha |
+| Revisão independente do código e novos testes | Sem bloqueadores identificados |
+| Verificação do diff | `git diff --check` sem erros |
+
+Foram acrescentados 197 casos de regressão. Os testes usam SQLite, tokens e
+dados sintéticos, serviços simulados e ficheiros temporários. Não fazem consultas
+SQL Server, chamadas reais ao Clerk, envio de emails ou alterações a contas reais.
+Os resultados comprovam os contratos HTTP, permissões, cache e integração local;
+não comprovam indicadores de produção ou disponibilidade dos serviços externos.
+
+```powershell
+python -m pytest tests/test_reporting_error_contract.py tests/test_reporting_errors.py tests/test_report_cache.py tests/test_report_cache_failures.py tests/test_dictionary_errors.py tests/test_dashboard_roles.py tests/test_swagger_docstrings.py -q
+python -m pytest -q
+git diff --check
+```
+
+Depois da integração em `izi`, validar no ambiente configurado um relatório
+autorizado, um acesso proibido e um pedido elegível para cache, confirmando os
+headers HIT/MISS. A próxima etapa só deve começar após validação do utilizador.

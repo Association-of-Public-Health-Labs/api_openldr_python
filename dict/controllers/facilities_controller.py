@@ -1,6 +1,5 @@
-from flask import jsonify
 from flask_restful import Resource, reqparse
-from utilities.controller_helpers import authenticated_resource_method
+from utilities.controller_helpers import run_reporting_endpoint
 from dict.services.facilities_services import (
     get_all_facilities,
     get_facilities_by_province,
@@ -9,7 +8,6 @@ from dict.services.facilities_services import (
 
 
 class dict__facilities(Resource):
-    method_decorators = [authenticated_resource_method]
     def get(self):
         """
         Get all facilities.
@@ -27,27 +25,13 @@ class dict__facilities(Resource):
                 description: Invalid facility type provided.
             404:
                 description: No facilities found.
+            500:
+                description: An error occurred. Internal details are not returned.
         """
-
-        try:
-
-            reponse = get_all_facilities()
-
-            return jsonify(reponse)
-
-        except Exception as e:
-
-            return jsonify(
-                {
-                    "status": "error",
-                    "error": "Failed to retrieve facilities",
-                    "message": str(e),
-                }
-            )
+        return run_reporting_endpoint(lambda: {}, lambda _: get_all_facilities())
 
 
 class dict__facilities__by_province(Resource):
-    method_decorators = [authenticated_resource_method]
     def get(self):
         """
         Get all facilities by province.
@@ -67,6 +51,8 @@ class dict__facilities__by_province(Resource):
                 description: Invalid facility type provided.
             404:
                 description: No facilities found.
+            500:
+                description: An error occurred. Internal details are not returned.
         """
         parser = reqparse.RequestParser()
 
@@ -77,27 +63,10 @@ class dict__facilities__by_province(Resource):
             action="append",
             help="This field cannot be blank.",
         )
-        req_args = parser.parse_args()
-
-        try:
-
-            facilities = get_facilities_by_province(req_args)
-
-            return jsonify(facilities)
-
-        except Exception as e:
-
-            return jsonify(
-                {
-                    "status": "error",
-                    "error": "Failed to retrieve facilities by province",
-                    "message": str(e),
-                }
-            )
+        return run_reporting_endpoint(parser.parse_args, get_facilities_by_province)
 
 
 class dict__facilities__by_district(Resource):
-    method_decorators = [authenticated_resource_method]
     def get(self):
         """
         Get all facilities by district.
@@ -117,6 +86,8 @@ class dict__facilities__by_district(Resource):
                 description: Invalid facility type provided.
             404:
                 description: No facilities found.
+            500:
+                description: An error occurred. Internal details are not returned.
         """
 
         parser = reqparse.RequestParser()
@@ -129,20 +100,4 @@ class dict__facilities__by_district(Resource):
             help="This field cannot be blank.",
         )
 
-        req_args = parser.parse_args()
-
-        try:
-
-            facilities = get_facilities_by_district(req_args)
-
-            return jsonify(facilities)
-
-        except Exception as e:
-
-            return jsonify(
-                {
-                    "message": str(e),
-                    "status": "error",
-                    "error": "Failed to retrieve facilities by district",
-                }
-            )
+        return run_reporting_endpoint(parser.parse_args, get_facilities_by_district)

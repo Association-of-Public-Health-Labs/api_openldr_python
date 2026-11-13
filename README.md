@@ -705,20 +705,58 @@ The API uses standard HTTP status codes:
 
 ### Error Response Format
 
+Reporting and dictionary endpoints return the actual HTTP error status. Service
+4xx errors retain their public message; `InvalidParameter` returns HTTP 400.
+Parser validation keeps the existing Flask-RESTful `message` object identifying
+the invalid field. Successful lists and paginated objects keep their current
+shape, including empty results.
+
+All reporting/dictionary 5xx responses contain only this generic envelope:
+
 ```json
 {
-    "status": 500,
-    "error": "Internal Server Error",
-    "message": "Detailed error description"
+    "status": "error",
+    "code": 500,
+    "message": "An error occurred"
 }
 ```
 
-### Patient Service Error Example
+An explicit service/HTTP error such as 503 retains that HTTP status and code;
+unexpected exceptions and invalid service error codes become 500. Internal SQL,
+driver messages, traces and partial data are not included in 5xx responses.
+Authentication endpoints retain their documented `status`/`error`/`message`
+contract.
+
+### Permission Error Example
 
 ```json
 {
     "status": "error",
     "code": 403,
-    "message": "Forbidden - User with id abc123 and role user is not authorized to access this resource."
+    "message": "Access denied for this role"
 }
 ```
+
+### Report Cache and Errors
+
+Authorization uses the current stored role before every cache lookup. The shared
+cache still covers default aggregate VL, EID and TB GX reports; dictionaries,
+TB culture, patient lists and single-facility requests remain live. Existing
+date windows, filter rules and the default 24-hour maximum age are preserved.
+
+Only successful report arrays/objects are stored. Cached error bodies, malformed
+envelopes, mismatched keys, invalid timestamps and expired entries are misses:
+the API calculates the report again. Cache lookup/write failures also fall back
+to the live response. A failed report keeps its real HTTP error status and is
+never stored or returned as a cache hit. Failed atomic writes preserve the
+previous entry and clean up temporary files.
+
+`X-Report-Cache: HIT` means a validated cached success was served; `MISS` means a
+successful live result was stored. `X-Report-Computed-At` gives its timestamp.
+Bypassed/unavailable caches and error responses omit these headers. The warm-up
+ignores malformed entries while retaining valid old keys for recomputation.
+No cache purge or database migration is required for this change.
+
+See [reporting errors and cache behaviour](docs/reporting-errors-and-cache.md)
+and [stage 4 validation](docs/priority-improvements.md#etapa-4--erros-http-e-cache)
+for the contract, regression checks and validation limits.

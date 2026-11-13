@@ -113,13 +113,18 @@ Validar uma conta por subdivisão, uma `global` e uma `Admin`, incluindo pedidos
 à subdivisão permitida e a uma proibida. Não foram alterados dados reais nesta
 implementação; a validação automatizada usa SQLite e tokens de teste.
 
-Novos controladores devem usar `run_reporting_endpoint`, ou a combinação
-`authenticate_request`/decorator autenticado para auxiliares. A política pura
-de caminhos não instala um bloqueio global: um novo módulo precisa ser
-registado na política e usar a pipeline autenticada, com testes de acesso.
+Novos controladores de relatórios e dicionários devem usar
+`run_reporting_endpoint`, que concentra autorização, parsing e respostas de erro.
+Os seis GET de dicionários também usam esta pipeline, com uma única consulta ao
+papel e sem cache. Outros auxiliares podem usar a combinação
+`authenticate_request`/decorator autenticado. A política pura de caminhos não
+instala um bloqueio global: um novo módulo precisa ser registado na política
+e usar a pipeline autenticada, com testes de acesso. O
+[contrato de erros e cache](reporting-errors-and-cache.md) descreve o comportamento
+das respostas; alterações de papel continuam a ser verificadas antes de um HIT.
 
 O fluxo geral de branches continua `branch isolada -> testes -> izi`; a integração
-e a validação pessoal em `dev` pertencem ao utilizador. Para a revisão actual do
-login, o utilizador pediu alterações directamente em `izi`, sem commit automático.
-Os resultados e limites constam da etapa 3 do
+e a validação pessoal em `dev` pertencem ao utilizador. A revisão do login na
+etapa 3 foi feita directamente em `izi`, com commit manual, por pedido do
+utilizador. A etapa 4 retoma a branch isolada. Os resultados e limites constam do
 [registo de melhorias](priority-improvements.md).
