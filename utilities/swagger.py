@@ -1,12 +1,35 @@
 # utilities/swagger.py
 from auth.roles import CANONICAL_ROLES
+from utilities.api_version import API_VERSION
 
 swagger_template = {
     "swagger": "2.0",
     "info": {
         "title": "OpenLDR Analytics API",
-        "description": "OpenLDR reports use persisted dashboard roles: vl, dpi, tb_gx, tb_cl and ad. The global role reads all report subdivisions; Admin manages users and retains privileged patient access. Shared dictionaries require an assigned dashboard role. See docs/access-control.md for the access matrix. Reporting and dictionary errors use real HTTP status codes; 5xx bodies contain only status, code and the generic message 'An error occurred'. Failed reports are never served as HTTP 200 cache hits. See docs/reporting-errors-and-cache.md. Reporting diagnostics use route patterns, HTTP codes and exception classes without patient details, query values or tracebacks. See docs/patient-log-privacy.md.",
-        "version": "1.0.0",
+        "description": (
+            "OpenLDR epidemiological and laboratory reporting API."
+            f"\n\n## What's new in {API_VERSION}\n\n"
+            "- Dashboard access uses persisted roles: vl, dpi, tb_gx, tb_cl and ad. "
+            "The global role reads all report subdivisions; Admin manages users "
+            "and retains privileged patient access. Shared dictionaries require "
+            "an assigned dashboard role. See docs/access-control.md.\n"
+            "- Local login uses username or email and a bcrypt-verified password. "
+            "Clerk token authentication remains supported.\n"
+            "- User removal now deactivates the account, preserving its row and "
+            "audit history. Repeated removal preserves the first timestamp. "
+            "Inactive accounts cannot log in; previously issued API and Clerk "
+            "JWTs are refused on the next protected request after deactivation "
+            "is committed. See docs/user-deactivation.md.\n"
+            "- Reporting and dictionary errors use real HTTP status codes. "
+            "5xx bodies contain only status, code and the generic message "
+            "'An error occurred'. Failed reports are never served as HTTP 200 "
+            "cache hits. See docs/reporting-errors-and-cache.md.\n"
+            "- Reporting diagnostics use route patterns, HTTP codes and exception "
+            "classes without patient details, query values or tracebacks. "
+            "See docs/patient-log-privacy.md.\n\n"
+            "See CHANGELOG.md for release compatibility and deployment requirements."
+        ),
+        "version": API_VERSION,
     },
     "securityDefinitions": {
         "Bearer": {
@@ -150,7 +173,7 @@ swagger_template = {
             "in": "body",
             "schema": {"$ref": "#/definitions/user_deletion"},
             "required": True,
-            "description": "The ID of the user to delete.",
+            "description": "The user_id of the account to deactivate (active Admin only). Preserves the account and audit history; repeated removal does not change the first deactivation timestamp.",
         },
         "UserCreateParameters": {
             "name": "create",
