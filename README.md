@@ -674,21 +674,34 @@ The pytest suite excludes the standalone live script and uses mocks/SQLite; pass
 
 ### Debug Mode
 
-Enable debug mode for detailed error information:
+Use debug mode only in isolated development with synthetic data. Keep it disabled
+when handling clinical requests, along with SQLAlchemy SQL echo:
 
 ```python
 # In app.py
-app.run(debug=True)
+app.run(debug=False)
 ```
 
 ### Logging
 
-Check application logs for detailed error information:
+Reporting diagnostics identify the registered route, HTTP error code and/or
+exception class. They omit exception messages, tracebacks, raw SQL, query
+parameters, patient records and bearer tokens, including values retained in
+logging arguments. Patient services return generic 500 errors and do not print
+queries or search filters. Authorised Admin responses keep their existing data.
 
 ```python
 import logging
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 ```
+
+Investigate using the timestamp, route, status and exception class; reproduce
+failures with synthetic data. Keep SQL echo and SQL parameter logging disabled
+for clinical traffic. Configure proxy/server access logs separately to omit
+query strings and authentication headers, since patient searches use GET filters.
+Existing logs are not removed by this change. See
+[patient log privacy](docs/patient-log-privacy.md) for scope and regression checks.
 
 ## Error Handling
 

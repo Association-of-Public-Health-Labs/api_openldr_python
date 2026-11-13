@@ -80,5 +80,6 @@ e ficheiros temporários. Cobrem os códigos HTTP nas quatro famílias, os seis
 dicionários, autorização antes do cache, ficheiros inválidos, falhas de escrita
 e o warm-up. Não validam os indicadores SQL nem a conectividade de produção.
 O [registo da etapa 4](priority-improvements.md#etapa-4--erros-http-e-cache)
-identifica os resultados e a integração. A protecção dos dados de pacientes
-nos logs continua reservada à etapa 5.
+identifica os resultados e a integração. A etapa 5 acrescenta a
+[protecção dos dados de pacientes nos logs](patient-log-privacy.md), preservando
+este contrato HTTP e as regras do cache.

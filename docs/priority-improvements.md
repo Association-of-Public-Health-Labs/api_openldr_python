@@ -16,8 +16,8 @@ de branch isolada e integração em `izi` depois dos testes.
 | 2 | `fix/02-user-create-permissions` | Autorização para criar utilizadores e atribuir papéis | Concluída localmente; aguarda validação do utilizador |
 | 2B | `feat/02-dashboard-roles` | Papéis de leitura por subdivisão e gestão das atribuições | Concluída localmente; aguarda validação do utilizador |
 | 3 | `izi`, commit manual `9c5fa0b` | Login local e credenciais de contas Clerk | Guardada pelo utilizador; etapa seguinte autorizada |
-| 4 | `fix/04-reporting-errors` | Respostas HTTP de erro dos relatórios e interacção com cache | Testes locais aprovados; destino de integração `izi` |
-| 5 | `fix/05-patient-log-privacy` | Protecção de dados de pacientes nos logs de erro | Por iniciar |
+| 4 | `fix/04-reporting-errors` | Respostas HTTP de erro dos relatórios e interacção com cache | Integrada em `izi` (`6559ec5`); etapa seguinte autorizada |
+| 5 | `fix/05-patient-log-privacy` | Protecção de dados de pacientes nos logs de erro | Testes locais aprovados; destino de integração `izi` |
 
 ## Critérios por etapa
 
@@ -334,8 +334,8 @@ consultas dos indicadores:
   Não são necessárias migrações ou uma limpeza geral do cache.
 
 O [contrato de erros e cache](reporting-errors-and-cache.md), o README, a
-[matriz de acesso](access-control.md) e o Swagger foram actualizados. A etapa 5,
-relativa aos dados de pacientes nos logs, permanece separada e por iniciar.
+[matriz de acesso](access-control.md) e o Swagger foram actualizados. Nesta etapa,
+a protecção dos dados de pacientes nos logs ficou reservada à etapa 5.
 
 ### Validação
 
@@ -367,3 +367,80 @@ git diff --check
 Depois da integração em `izi`, validar no ambiente configurado um relatório
 autorizado, um acesso proibido e um pedido elegível para cache, confirmando os
 headers HIT/MISS. A próxima etapa só deve começar após validação do utilizador.
+
+## Etapa 5 — Privacidade dos logs de pacientes
+
+Branch `fix/05-patient-log-privacy`, criada numa worktree isolada a partir de
+`izi` no commit `6559ec5`, após o utilizador pedir o avanço. A cópia inicial
+estava limpa. O destino da integração local continua a ser apenas `izi`; a
+validação e integração em `dev` pertencem ao utilizador.
+
+### Problemas reproduzidos
+
+- A pipeline registava o campo interno `error` e usava `logger.exception`.
+  Uma excepção SQLAlchemy/ODBC podia copiar SQL, parâmetros, nomes, contactos e
+  identificadores para o texto ou argumentos do log e para o traceback.
+- O serviço de pacientes VL devolvia o texto da excepção em `error`, que a
+  pipeline registava. Os quatro serviços TB GX incluíam o detalhe em `message`.
+  EID já devolvia erro genérico e registava apenas a classe, pelo que foi mantido.
+- Permaneciam prints de consultas com `literal_binds`, filtros e SQL nos serviços
+  TB GX e dicionários, incluindo os drill-downs Admin que devolvem pacientes.
+  Estes prints também ocorriam em pedidos bem-sucedidos.
+
+### Alterações e compatibilidade
+
+- A pipeline regista eventos fixos, padrão da rota, código HTTP validado e/ou
+  classe da excepção. Não entrega ao logger o texto/objecto da excepção, dados
+  do pedido, SQL, valores de filtros ou traceback, incluindo os argumentos
+  retidos em `LogRecord`. Rejeições de token seguem a mesma regra.
+- É usado o padrão registado da rota, evitando valores dinâmicos do URL.
+  Mensagens de validação 400 e os contratos HTTP existentes são preservados.
+- VL e as quatro pesquisas TB GX devolvem um 500 genérico e registam apenas o
+  tipo da falha. O padrão seguro já existente em EID permanece sem alterações.
+- Foram removidos 17 prints activos de SQL/filtros: dois das pesquisas TB GX e
+  15 dos serviços de unidades sanitárias, laboratórios e dicionários. Consultas,
+  selecções, filtros, paginação e serializadores não foram reescritos.
+- As respostas Admin mantêm os dados clínicos previstos, sem os copiar para
+  stdout ou logs. A autorização precede consultas/cache; pacientes continuam
+  reservados a Admin e sem cache. Login, Clerk e auditoria de contas são mantidos.
+
+O [contrato de privacidade dos logs](patient-log-privacy.md), README, Swagger,
+[matriz de acesso](access-control.md) e [contrato de erros/cache](reporting-errors-and-cache.md)
+foram actualizados, incluindo o diagnóstico seguro e os limites operacionais.
+
+### Validação
+
+| Verificação | Resultado |
+| --- | --- |
+| Primeiros testes de privacidade antes da correcção | 69 falhas, 85 sucessos |
+| Drill-downs/dicionários antes da remoção de prints | 6 falhas, 2 sucessos |
+| Privacidade HTTP/serviços, incluindo logging de token e rota dinâmica | 167 sucessos |
+| Drill-downs TB Admin e dicionários com consultas/serialização reais | 8 sucessos |
+| Conjunto dirigido, incluindo pacientes, SQL, HTTP, cache e tokens | 416 sucessos |
+| Suite completa na branch da etapa | 2 500 sucessos, 1 ignorado, nenhuma falha |
+| Revisão independente da pipeline, serviços e novos testes | Sem bloqueadores identificados |
+| Verificação do diff | `git diff --check` sem erros |
+
+Os 175 novos casos cobrem as 11 rotas de pacientes (quatro VL, três EID e quatro
+TB GX), erros devolvidos, excepções inesperadas, `StatementError` com SQL e
+parâmetros e objectos cuja conversão para texto falha. São inspeccionados stdout,
+stderr e os campos retidos pelo logger, além do corpo HTTP. Também são exercitados
+os serializadores de sucesso, paginação, restrições 401/403 e ausência de cache.
+
+São usados SQLite, dados/tokens sintéticos e execução SQL substituída. Não foram
+consultadas bases clínicas, alteradas contas reais ou enviados emails. Não são
+reconfigurados logs de proxies, servidor HTTP, ODBC ou SQL Server, nem eliminados
+logs históricos. A nova documentação distingue estes limites da protecção dos
+diagnósticos da aplicação; os testes não comprovam indicadores SQL reais.
+
+```powershell
+python -m pytest tests/test_patient_log_privacy.py tests/test_patient_drilldown_log_privacy.py tests/hiv/test_vl_patients.py tests/hiv/test_vl_patients_sql.py tests/hiv/test_eid_patients.py tests/hiv/test_eid_patients_sql.py tests/tb/test_tb_patients.py tests/test_reporting_error_contract.py tests/test_report_cache.py tests/test_token_verification.py -q
+python -m pytest -q
+git diff --check
+```
+
+Após a integração em `izi`, validar no ambiente configurado um sucesso e uma
+falha controlada, usando dados sintéticos, e confirmar que os novos logs contêm
+apenas os diagnósticos previstos. As cinco etapas do plano inicial ficam
+implementadas localmente; o avanço para doenças avançadas aguarda a validação
+do utilizador e a definição dos respectivos modelos, indicadores e endpoints.

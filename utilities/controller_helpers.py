@@ -134,6 +134,11 @@ def unauthorized_response():
     )
 
 
+def _request_route():
+    """Log the registered route pattern, never request values or query strings."""
+    return request.url_rule.rule if request.url_rule is not None else "<unmatched>"
+
+
 def authenticate_request():
     """
     Verify the JWT, resolve its subject's persisted role and authorize the route.
@@ -154,7 +159,7 @@ def authenticate_request():
     try:
         token_payload = verify_bearer_token(token)
     except TokenVerificationError as exc:
-        logger.warning("Rejected token on %s: %r", request.path, str(exc))
+        logger.warning("Rejected token on %s (%s)", _request_route(), type(exc).__name__)
         return None, unauthorized_response()
 
     # The verified subject identifies the account; custom claims cannot select
@@ -165,7 +170,7 @@ def authenticate_request():
     try:
         user = get_user_by_id_service(user_id)
     except Exception as exc:
-        logger.error("Role lookup failed on %s (%s)", request.path, type(exc).__name__)
+        logger.error("Role lookup failed on %s (%s)", _request_route(), type(exc).__name__)
         return None, ({"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500)
 
     role = user.role if user is not None else None
@@ -211,6 +216,8 @@ def service_result_response(result):
     bodies keep their public fields, without the internal ``error`` detail.
     For 5xx only the status, code and a generic message are returned: other
     fields may also contain SQL, driver details or partial report data.
+    Diagnostics contain only the registered route and validated HTTP code;
+    the internal error is never formatted or retained in a log record.
     """
     if not (isinstance(result, dict) and result.get("status") == "error"):
         return result
@@ -219,8 +226,10 @@ def service_result_response(result):
     if not isinstance(code, int) or not 400 <= code <= 599:
         code = 500
 
-    if result.get("error"):
-        logger.error("Service error on %s: %s", request.path, result["error"])
+    if code >= 500 or "error" in result:
+        # Driver errors can carry SQL and bound patient/contact identifiers.
+        # Never retain the error object or its text in the LogRecord either.
+        logger.error("Service error on %s (HTTP %s)", _request_route(), code)
 
     if code >= 500:
         return {"status": "error", "code": code, "message": GENERIC_SERVER_ERROR}, code
@@ -257,8 +266,9 @@ def run_reporting_endpoint(parse_fn, service_fn):
     5. Invoke ``service_fn(req_args)``.
     6. Map the outcome to an HTTP response: ``InvalidParameter`` -> 400,
        service error dicts -> their own status, anything unexpected -> a
-       generic 500 (details are logged, never returned). A successful default
-       report is stored in the cache.
+       generic 500. Diagnostics log only the exception class and registered
+       route, without its message or traceback. A successful default report
+       is stored in the cache.
     """
     user_id, err = authenticate_request()
     if err is not None:
@@ -276,7 +286,7 @@ def run_reporting_endpoint(parse_fn, service_fn):
     except Exception as exc:
         # The cache is optional. Its failure must not interrupt a live report
         # or turn an internal cache exception into a public error response.
-        logger.warning("Report cache lookup failed on %s (%s)", request.path, type(exc).__name__)
+        logger.warning("Report cache lookup failed on %s (%s)", _request_route(), type(exc).__name__)
         cache_key = None
 
     try:
@@ -285,13 +295,13 @@ def run_reporting_endpoint(parse_fn, service_fn):
         result = service_fn(req_args)
     except HTTPException as exc:
         if exc.code is not None and exc.code >= 500:
-            logger.error("Reporting HTTP error on %s (%s)", request.path, type(exc).__name__)
+            logger.error("Reporting HTTP error on %s (%s)", _request_route(), type(exc).__name__)
             return {"status": "error", "code": exc.code, "message": GENERIC_SERVER_ERROR}, exc.code
         raise
     except InvalidParameter as exc:
         return {"status": "error", "code": 400, "message": str(exc)}, 400
-    except Exception:
-        logger.exception("Unhandled error on %s", request.path)
+    except Exception as exc:
+        logger.error("Unhandled error on %s (%s)", _request_route(), type(exc).__name__)
         return {"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500
 
     response = service_result_response(result)
@@ -300,7 +310,7 @@ def run_reporting_endpoint(parse_fn, service_fn):
         try:
             entry = report_cache.write(cache_key, response)
         except Exception as exc:
-            logger.warning("Report cache write failed on %s (%s)", request.path, type(exc).__name__)
+            logger.warning("Report cache write failed on %s (%s)", _request_route(), type(exc).__name__)
             entry = None
         if entry is not None:
             return response, 200, _cache_headers("MISS", entry["computed_at"])
