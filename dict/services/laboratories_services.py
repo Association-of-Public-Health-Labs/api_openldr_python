@@ -22,7 +22,6 @@ def get_all_laboratories():
         )
     )
 
-    print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
     data = query.all()
 
@@ -62,7 +61,6 @@ def get_laboratories_by_province(req_args):
             )
         )
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
         data = query.all()
         data_json = [
@@ -103,7 +101,6 @@ def get_laboratories_by_district(req_args):
             )
         )
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
         data = query.all()
 

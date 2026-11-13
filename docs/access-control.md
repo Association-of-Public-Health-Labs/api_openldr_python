@@ -122,6 +122,8 @@ instala um bloqueio global: um novo módulo precisa ser registado na política
 e usar a pipeline autenticada, com testes de acesso. O
 [contrato de erros e cache](reporting-errors-and-cache.md) descreve o comportamento
 das respostas; alterações de papel continuam a ser verificadas antes de um HIT.
+A [protecção dos logs de pacientes](patient-log-privacy.md) conserva os dados
+das respostas Admin, evitando copiá-los para stdout ou diagnósticos de erro.
 
 O fluxo geral de branches continua `branch isolada -> testes -> izi`; a integração
 e a validação pessoal em `dev` pertencem ao utilizador. A revisão do login na

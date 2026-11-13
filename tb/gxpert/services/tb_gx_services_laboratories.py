@@ -1051,7 +1051,6 @@ def tested_samples_by_samples_types_by_laboratory_by_month_service(req_args):
         )
 
         # Print the query
-        print(query)
 
         data = query.all()
 
@@ -2802,7 +2801,6 @@ def trl_samples_avg_by_lab_service(req_args):
             .order_by(ColumnNames)
         )
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
         data = query.all()
 
@@ -2961,8 +2959,6 @@ def trl_samples_avg_by_lab_month_service(req_args):
 
             data = query.all()
 
-            print(query.statement.compile(
-                compile_kwargs={"literal_binds": True}))
 
             response = process_patients(
                 data, dates, facility_type, gx_result_type, "tb", month, year
