@@ -208,9 +208,9 @@ def service_result_response(result):
     Turn a service's error dict into a real HTTP status.
 
     Services return ``{"status": "error", "code": N, ...}`` on failure. 4xx
-    bodies are returned as they are. For 5xx the exception text (``error``)
-    is logged and dropped, and the message is replaced with a generic one,
-    so SQL and driver details never reach the caller.
+    bodies keep their public fields, without the internal ``error`` detail.
+    For 5xx only the status, code and a generic message are returned: other
+    fields may also contain SQL, driver details or partial report data.
     """
     if not (isinstance(result, dict) and result.get("status") == "error"):
         return result
@@ -222,10 +222,10 @@ def service_result_response(result):
     if result.get("error"):
         logger.error("Service error on %s: %s", request.path, result["error"])
 
+    if code >= 500:
+        return {"status": "error", "code": code, "message": GENERIC_SERVER_ERROR}, code
     body = {key: value for key, value in result.items() if key != "error"}
     body["code"] = code
-    if code >= 500:
-        body["message"] = GENERIC_SERVER_ERROR
     return body, code
 
 
@@ -265,17 +265,28 @@ def run_reporting_endpoint(parse_fn, service_fn):
         return err
 
     # Authorization is checked against the database before any cached response.
-    cache_key = report_cache.cache_key(request.path, dict(request.args.lists())) if _report_cache_active() else None
-    if cache_key is not None and not FORCE_REFRESH:
-        entry = report_cache.read(cache_key)
-        if entry is not None:
-            return entry["data"], 200, _cache_headers("HIT", entry["computed_at"])
+    cache_key = None
+    try:
+        if _report_cache_active():
+            cache_key = report_cache.cache_key(request.path, dict(request.args.lists()))
+        if cache_key is not None and not FORCE_REFRESH:
+            entry = report_cache.read(cache_key)
+            if entry is not None:
+                return entry["data"], 200, _cache_headers("HIT", entry["computed_at"])
+    except Exception as exc:
+        # The cache is optional. Its failure must not interrupt a live report
+        # or turn an internal cache exception into a public error response.
+        logger.warning("Report cache lookup failed on %s (%s)", request.path, type(exc).__name__)
+        cache_key = None
 
     try:
         req_args = parse_fn()
         req_args["user_id"] = user_id
         result = service_fn(req_args)
-    except HTTPException:
+    except HTTPException as exc:
+        if exc.code is not None and exc.code >= 500:
+            logger.error("Reporting HTTP error on %s (%s)", request.path, type(exc).__name__)
+            return {"status": "error", "code": exc.code, "message": GENERIC_SERVER_ERROR}, exc.code
         raise
     except InvalidParameter as exc:
         return {"status": "error", "code": 400, "message": str(exc)}, 400
@@ -286,7 +297,11 @@ def run_reporting_endpoint(parse_fn, service_fn):
     response = service_result_response(result)
     # Errors come back as (body, code); only a successful report is cached.
     if cache_key is not None and not isinstance(response, tuple):
-        entry = report_cache.write(cache_key, response)
+        try:
+            entry = report_cache.write(cache_key, response)
+        except Exception as exc:
+            logger.warning("Report cache write failed on %s (%s)", request.path, type(exc).__name__)
+            entry = None
         if entry is not None:
             return response, 200, _cache_headers("MISS", entry["computed_at"])
     return response

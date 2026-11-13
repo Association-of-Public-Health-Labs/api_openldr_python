@@ -5,7 +5,7 @@ swagger_template = {
     "swagger": "2.0",
     "info": {
         "title": "OpenLDR Analytics API",
-        "description": "OpenLDR reports use persisted dashboard roles: vl, dpi, tb_gx, tb_cl and ad. The global role reads all report subdivisions; Admin manages users and retains privileged patient access. Shared dictionaries require an assigned dashboard role. See docs/access-control.md for the access matrix.",
+        "description": "OpenLDR reports use persisted dashboard roles: vl, dpi, tb_gx, tb_cl and ad. The global role reads all report subdivisions; Admin manages users and retains privileged patient access. Shared dictionaries require an assigned dashboard role. See docs/access-control.md for the access matrix. Reporting and dictionary errors use real HTTP status codes; 5xx bodies contain only status, code and the generic message 'An error occurred'. Failed reports are never served as HTTP 200 cache hits. See docs/reporting-errors-and-cache.md.",
         "version": "1.0.0",
     },
     "securityDefinitions": {
