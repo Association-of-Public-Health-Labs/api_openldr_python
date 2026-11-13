@@ -93,7 +93,7 @@ def test_clerk_identity_comes_from_verified_sub(client, mail_env, monkeypatch, p
         mail_env[2].return_value = None
     response = client.post("/tb/gx/send-suggestion?duvida=true", json=PAYLOAD,
                            headers={"Authorization": f"Bearer {make_clerk_token(sub='user_clerk_42')}"})
-    assert response.status_code == (200 if registered else 403)
+    assert response.status_code == (200 if registered else 401)
     if registered:
         mail_env[2].assert_called_once_with("user_clerk_42")
     else:

@@ -143,10 +143,10 @@ def test_admin_can_list_and_delete_users(client, app, persisted_user):
         deleted = client.delete("/auth/delete", headers=headers, json={"user_id": target})
         assert deleted.status_code == 200
         with app.app_context():
-            assert User.query.filter_by(user_id=target).first() is None
+            assert User.query.filter_by(user_id=target).one().is_active is False
     finally:
         with app.app_context():
-            UserLogs.query.filter_by(user_id=actor).delete()
+            UserLogs.query.filter(UserLogs.user_id.in_([actor, target])).delete(synchronize_session=False)
             db.session.commit()
 
 

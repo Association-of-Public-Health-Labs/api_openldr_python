@@ -125,7 +125,7 @@ def test_deleted_user_cannot_reuse_valid_token(client, app, persisted_user):
             User.query.filter_by(user_id=user_id).delete()
             db.session.commit()
         response = client.get(url, headers=headers)
-    assert response.status_code == 403
+    assert response.status_code == 401
     assert query.call_count == 1
 
 
@@ -166,7 +166,7 @@ def test_missing_persisted_identity_cannot_use_admin_claim(client, app):
     _, url, service = REPORTS[0]
     with patch(service, return_value=[]) as query:
         response = client.get(url, headers=bearer(app, "missing-user", role="Admin"))
-    assert response.status_code == 403
+    assert response.status_code == 401
     query.assert_not_called()
 
 

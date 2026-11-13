@@ -1,7 +1,8 @@
 # Papéis e acesso por subdivisão
 
-Cada conta tem **um papel** no campo existente `User.role`. Não há alteração de
-esquema nem atribuição automática de novos privilégios às contas existentes.
+Cada conta tem **um papel** no campo existente `User.role`. A atribuição de papéis
+não promove automaticamente contas existentes. O estado independente `is_active`
+exige a [migração de desactivação lógica](user-deactivation.md) antes da nova API.
 O controlo é aplicado pela API, independentemente do que a dashboard mostre.
 
 | Papel persistido | Relatórios permitidos | Gestão de utilizadores |
@@ -41,13 +42,15 @@ completa; ver uma rota na documentação não concede acesso aos seus dados.
 1. A API verifica a assinatura e validade do token Clerk ou do token da API.
 2. O `sub` verificado identifica a conta local; um claim adicional `user_id`
    não selecciona outra conta.
-3. A API consulta o papel persistido em cada pedido. Claims `role` do JWT e
+3. A API confirma que a conta existe e está activa e consulta o papel persistido
+   em cada pedido. Claims `role` do JWT e
    campos do pedido não atribuem permissões.
 4. A autorização é verificada **antes do cache e da consulta ao relatório**.
-   Uma alteração de papel ou eliminação da conta tem efeito no pedido seguinte,
+   Uma alteração de papel, desactivação ou ausência da conta tem efeito no pedido seguinte,
    mesmo com o mesmo token e um relatório já em cache.
 
-Token ausente ou inválido nos relatórios/dicionários dá 401; conta sem subdivisão,
+Token ausente ou inválido, conta ausente ou inactiva nos relatórios/dicionários
+dá 401; conta activa sem subdivisão,
 papel desconhecido ou acesso a outra subdivisão dá 403. Uma falha na consulta de
 permissões dá 500 genérico, sem executar o relatório nem revelar SQL.
 
@@ -56,7 +59,7 @@ valores legados como `admin`, `User` ou ` VL ` para um papel privilegiado.
 
 ## Atribuir ou alterar um papel
 
-Apenas um operador cujo papel persistido seja exactamente `Admin` usa
+Apenas um operador activo cujo papel persistido seja exactamente `Admin` usa
 `POST /auth/create` e `PUT /auth/update` para atribuir papéis. Estes endpoints
 aceitam os valores da tabela, normalizando maiúsculas/minúsculas e espaços na
 atribuição; valores desconhecidos são rejeitados com 400.

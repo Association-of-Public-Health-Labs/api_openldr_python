@@ -25,7 +25,7 @@ CLERK_USER = {
 }
 DB_USER = SimpleNamespace(
     user_id="user_abc", user_name="Ana_Silva", first_name="Ana",
-    last_name="Silva", email="ana@openldr.org.mz", role="Admin",
+    last_name="Silva", email="ana@openldr.org.mz", role="Admin", is_active=True,
 )
 
 

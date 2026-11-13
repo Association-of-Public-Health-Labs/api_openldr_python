@@ -104,7 +104,12 @@ def login_user_service(args):
             identifiers["email"] = login_email
         # When both identifiers are supplied they must identify the same row.
         # Duplicates must never select an arbitrary account through .first().
-        matches = User.query.filter_by(**identifiers).limit(2).all()
+        matches = (
+            User.query.populate_existing()
+            .filter_by(is_active=True, **identifiers)
+            .limit(2)
+            .all()
+        )
         if len(matches) != 1:
             return invalid
         user = matches[0]
@@ -236,7 +241,7 @@ def update_user_service(args, id):
     ):
         return _error_response(400, "Bad Request", "Passwords do not match")
 
-    user_query = User.query.filter_by(user_id=update_user_id).first()
+    user_query = get_user_by_id_service(update_user_id)
     if not user_query:
         return _error_response(404, "Not Found", "User not found")
 
@@ -280,8 +285,7 @@ def update_user_service(args, id):
 
 def delete_user_service(id, current_user=None):
     """
-    Delete a user by ID.
-    Note: Logging is handled by the controller (Clerk webhook).
+    Deactivate a user while preserving their row and audit references.
 
     Args:
         id: User ID to delete
@@ -297,19 +301,51 @@ def delete_user_service(id, current_user=None):
         if error:
             return error
 
-    user_query = User.query.filter_by(user_id=id).first()
-    if not user_query:
-        return _error_response(404, "Not Found", "User not found")
-
-    # Store values before deletion for response
-    deleted_data = _build_user_data(user_query)
-
     try:
-        db.session.delete(user_query)
+        # Include tombstones so retries retain the existing success contract.
+        user_query = get_user_by_id_service(id, include_inactive=True)
+        if not user_query:
+            return _error_response(404, "Not Found", "User not found")
+        deleted_data = _build_user_data(user_query)
+        changed_at = datetime.now()
+        changed = (
+            User.query.filter_by(user_id=id, is_active=True)
+            .update(
+                {User.is_active: False, User.updated_at: changed_at},
+                synchronize_session=False,
+            )
+        )
+        if changed not in (0, 1):
+            raise RuntimeError("Unable to confirm account deactivation count")
+        if changed == 1:
+            # The conditional UPDATE and this audit entry share one transaction.
+            # A repeat does not update either the timestamp or the audit log.
+            db.session.add(
+                UserLogs(
+                    user_id=id,
+                    log_id=str(uuid4()),
+                    log_date=changed_at,
+                    log_type="user_deactivated",
+                    log_details=json.dumps(
+                        {
+                            "event": "user_deactivated",
+                            "actor_id": current_user if current_user is not None else "clerk",
+                            "target_user_id": id,
+                            "deactivated_at": changed_at.isoformat(),
+                            "source": "api" if current_user is not None else "clerk",
+                        }
+                    ),
+                )
+            )
+        # This project keeps instances after commit. Invalidate only the two
+        # bulk-updated fields so later reads see the persisted state, including
+        # a concurrent deactivation's original timestamp when no row changed.
+        db.session.expire(user_query, ["is_active", "updated_at"])
         db.session.commit()
-    except Exception as e:
+    except Exception as exc:
         db.session.rollback()
-        return _error_response(500, "Internal Server Error", str(e))
+        logger.error("User deactivation persistence failed (%s)", type(exc).__name__)
+        return _error_response(500, "Internal Server Error", "An error occurred")
 
     return {
         "message": "User deleted successfully",
@@ -411,6 +447,12 @@ def _create_user_record(args):
     if create_password != create_confirm_password:
         return _error_response(400, "Bad Request", "Passwords do not match")
 
+    new_user_id = args.get("user_id") or str(uuid4())
+    # A deactivated Clerk identity remains reserved. Neither provisioning nor
+    # account creation can overwrite it or turn a deletion into reactivation.
+    if get_user_by_id_service(new_user_id, include_inactive=True) is not None:
+        return _error_response(409, "Conflict", "User already exists")
+
     # Check for existing user with same username/email
     existing_users = User.query.filter_by(user_name=create_username).all()
     for user in existing_users:
@@ -419,8 +461,6 @@ def _create_user_record(args):
                 return _error_response(
                     400, "Bad Request", "Username or email already exists"
                 )
-
-    new_user_id = args.get("user_id") or str(uuid4())
 
     user = User(
         user_name=create_username,
@@ -432,6 +472,7 @@ def _create_user_record(args):
         user_id=new_user_id,
         start_date=datetime.now(),
         updated_at=datetime.now(),
+        is_active=True,
     )
 
     try:
@@ -472,7 +513,7 @@ def get_all_users_service(id):
             "message": f"Forbidden - User with id {user.user_id} and role {user.role} is not authorized to access this resource.",
         }
 
-    users = User.query.all()
+    users = User.query.populate_existing().filter_by(is_active=True).all()
 
     try:
         save_user_log_service(
@@ -508,19 +549,23 @@ def get_all_users_service(id):
     ]
 
 
-def get_user_by_id_service(id):
+def get_user_by_id_service(id, *, include_inactive=False):
     """
-    Get a user by their id.
+    Get an active account by its persisted user ID.
 
     Args:
-        id (int): The id of the user.
+        id (str): The account's user_id primary key.
+        include_inactive (bool): Internal history/tombstone lookup only.
 
     Returns:
         User: The user object if found, None otherwise.
     """
-    user = (
-        User.query.filter(User.user_id == id).order_by(User.start_date.desc()).first()
-    )
+    # Re-read the database even when this identity is already in the session.
+    # Authorization cannot rely on a stale cached instance after deactivation.
+    query = User.query.populate_existing().filter(User.user_id == id)
+    if not include_inactive:
+        query = query.filter_by(is_active=True)
+    user = query.first()
 
     return user
 
@@ -548,7 +593,7 @@ def update_last_login_service(user_id: str):
     Note: Logging is handled by the controller (Clerk webhook).
     """
     try:
-        user = User.query.filter_by(user_id=user_id).first()
+        user = get_user_by_id_service(user_id)
         if not user:
             return _error_response(404, "Not Found", "User not found")
 

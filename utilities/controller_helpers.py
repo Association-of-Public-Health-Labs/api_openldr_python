@@ -173,7 +173,9 @@ def authenticate_request():
         logger.error("Role lookup failed on %s (%s)", _request_route(), type(exc).__name__)
         return None, ({"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500)
 
-    role = user.role if user is not None else None
+    if user is None:
+        return None, unauthorized_response()
+    role = user.role
     if not role_can_access_path(role, request.path):
         return None, forbidden_response()
     if role != "Admin" and request.method not in {"GET", "HEAD", "OPTIONS"}:

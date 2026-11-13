@@ -1,5 +1,6 @@
 import logging
 import secrets
+from functools import wraps
 
 import requests
 from flask_restful import Resource, reqparse
@@ -67,6 +68,23 @@ def _user_service_error_response(result):
             }
         return result, status
     return None
+
+
+def _active_account_required(method):
+    """Recheck persisted account state after Flask-JWT validates the token."""
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        try:
+            user = get_user_by_id_service(get_jwt_identity())
+        except Exception as exc:
+            logger.error("Account validation failed (%s)", type(exc).__name__)
+            return _user_service_error_response({"status": 500})
+        if user is None:
+            return _user_service_error_response({
+                "status": 401, "error": "Unauthorized", "message": "User not authenticated",
+            })
+        return method(*args, **kwargs)
+    return wrapped
 
 
 def _get_clerk_headers():
@@ -153,6 +171,7 @@ class user_controller(Resource):
     """
 
     @jwt_required()
+    @_active_account_required
     def get(self):
         """
         Handle GET request all users
@@ -233,6 +252,7 @@ class user_controller(Resource):
             return _user_service_error_response({"status": 500})
 
     @jwt_required()
+    @_active_account_required
     def put(self):
         """
         Handle PUT request for user update.
@@ -287,10 +307,13 @@ class user_controller(Resource):
             return _user_service_error_response({"status": 500})
 
     @jwt_required()
+    @_active_account_required
     def delete(self):
         """
-        Handle DELETE request for user deletion.
-        Expects 'user_id' in the request body.
+        Logically deactivate a user, preserving the row and audit history.
+        Requires an active Admin and 'user_id' in the request body. Repeating
+        the operation returns the same success shape without changing updated_at
+        or recording another transition. Existing tokens are refused on the next request.
         ---
         tags:
             - Authentication
@@ -300,13 +323,15 @@ class user_controller(Resource):
             - $ref: '#/parameters/UserDeletionParameters'
         responses:
             200:
-                description: Returns a success message if deletion is successful.
+                description: User deactivated or already inactive. The existing success payload is preserved.
             400:
                 description: Invalid Parameters
             401:
                 description: Unauthorized
             403:
                 description: Forbidden
+            404:
+                description: Target user does not exist.
             500:
                 description: An Error Occurred
         """
@@ -336,6 +361,7 @@ class user_controller(Resource):
 
 class user_create_controller(Resource):
     @jwt_required()
+    @_active_account_required
     def post(self):
         """
         Create a user on behalf of a persisted Admin.
@@ -504,7 +530,8 @@ class clerk_user_controller(Resource):
                 400, "Bad Request", "Failed to fetch user details from Clerk API"
             )
 
-        existing_user = get_user_by_id_service(user_id)
+        # A deactivated row is a tombstone, not a missing Clerk account.
+        existing_user = get_user_by_id_service(user_id, include_inactive=True)
 
         if existing_user:
             return self._login_existing_user(existing_user, data)
@@ -513,7 +540,13 @@ class clerk_user_controller(Resource):
 
     def _login_existing_user(self, user, data: dict):
         """Record a Clerk login for an existing user (no token is issued)."""
-        update_last_login_service(user.user_id)
+        if not user.is_active:
+            return _user_service_error_response({
+                "status": 401, "error": "Unauthorized", "message": "Invalid credentials",
+            })
+        error = _user_service_error_response(update_last_login_service(user.user_id))
+        if error is not None:
+            return error
 
         user_data = {
             "user_id": user.user_id,
@@ -632,19 +665,12 @@ class clerk_user_controller(Resource):
         return _success_response(user_update.get("message"), user_update.get("data"))
 
     def _handle_user_deleted(self, data: dict):
-        """Handle user.deleted event."""
+        """Deactivate after Svix verification; audit only the atomic transition."""
         user_id = data.get("data", {}).get("id")
 
         deleted = delete_user_service(user_id)
 
-        user_data = {"user_id": user_id}
-        log_args = _build_log_args(
-            user_id,
-            "user_deleted",
-            "user_deleted",
-            "auth_controller.clerk_webhook",
-            user_data,
-        )
-        _save_log_silent(log_args)
-
+        error = _user_service_error_response(deleted)
+        if error is not None:
+            return error
         return _success_response(deleted.get("message"), deleted.get("data"))
