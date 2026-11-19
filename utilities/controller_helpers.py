@@ -31,13 +31,17 @@ Usage example::
             )
 """
 
+import copy
+
 from flask import current_app, request, session
 from functools import wraps
 from flask_restful import reqparse
+from sqlalchemy.exc import DBAPIError
 from werkzeug.exceptions import HTTPException
 
 import logging
 
+from db.database import db
 from utilities import report_cache
 from auth.auth_service import get_user_by_id_service
 from auth.roles import role_can_access_path
@@ -244,6 +248,53 @@ def service_result_response(result):
 FORCE_REFRESH = False
 
 
+# SQL Server drops some connections mid-query (production reaches it through a tunnel):
+# SQLSTATE 08S01 "communication link failure", with TCP Provider error 104 (reset) or
+# 10060 (timeout). Reports are read-only, so one retry on a fresh connection is safe.
+_DROPPED_CONNECTION_MARKERS = ("08S01", "Communication link failure", "TCP Provider")
+
+
+def _is_dropped_connection(outcome):
+    """True for a raised SQLAlchemy error or a service error dict caused by a dropped connection."""
+    if isinstance(outcome, DBAPIError):
+        if outcome.connection_invalidated:
+            return True
+        text = str(outcome.orig)
+    elif isinstance(outcome, dict) and outcome.get("status") == "error":
+        code = outcome.get("code")
+        if isinstance(code, int) and code < 500:
+            return False
+        text = str(outcome.get("error", ""))
+    else:
+        return False
+    return any(marker in text for marker in _DROPPED_CONNECTION_MARKERS)
+
+
+def _reset_db_session():
+    """Discard the failed transaction and the session; the next query checks out a fresh connection."""
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+    db.session.remove()
+
+
+def _call_service_with_reconnect(service_fn, req_args):
+    """Run ``service_fn``; when the database connection drops, reset the session and run it once more."""
+    try:
+        result = service_fn(copy.copy(req_args))
+    except DBAPIError as exc:
+        if not _is_dropped_connection(exc):
+            raise
+    else:
+        if not _is_dropped_connection(result):
+            return result
+    # Only the route is logged: the error text can carry SQL and bound identifiers.
+    logger.warning("Database connection dropped on %s; retrying once", _request_route())
+    _reset_db_session()
+    return service_fn(copy.copy(req_args))
+
+
 def _report_cache_active():
     """``REPORT_CACHE_ENABLED`` in the app config wins (tests); otherwise the environment, never in tests."""
     flag = current_app.config.get("REPORT_CACHE_ENABLED")
@@ -294,7 +345,7 @@ def run_reporting_endpoint(parse_fn, service_fn):
     try:
         req_args = parse_fn()
         req_args["user_id"] = user_id
-        result = service_fn(req_args)
+        result = _call_service_with_reconnect(service_fn, req_args)
     except HTTPException as exc:
         if exc.code is not None and exc.code >= 500:
             logger.error("Reporting HTTP error on %s (%s)", _request_route(), type(exc).__name__)
