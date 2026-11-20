@@ -201,7 +201,7 @@ def test_signed_clerk_creation_cannot_assign_admin_from_metadata(client, app, mo
             response = signed_post(client, {"type": "user.created", "data": {"id": target}})
         assert response.status_code == 200
         with app.app_context():
-            assert User.query.filter_by(user_id=target).one().role == "user"
+            assert User.query.filter_by(user_id=target).one().role == "global"
     finally:
         with app.app_context():
             UserLogs.query.filter_by(user_id=target).delete()
