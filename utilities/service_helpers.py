@@ -3,6 +3,8 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import func, text
 
+from utilities.permissions import patient_access_role, permissions_enforced
+
 
 def default_interval_dates(months=12):
     """Return a fresh [start_date, end_date] window for each request."""
@@ -92,6 +94,8 @@ def apply_lab_type_filter(filters, model, lab_type, resolver):
 def get_user_role(req_args, user_lookup):
     """Resolve request user context without propagating lookup failures."""
     user_id = req_args.get("user_id")
+    if permissions_enforced():
+        return user_id, patient_access_role(None)
     if user_id is None:
         return None, "Unknown"
 
@@ -100,7 +104,7 @@ def get_user_role(req_args, user_lookup):
     except Exception:
         return user_id, "Unknown"
 
-    return user_id, user.role if user else "Unknown"
+    return user_id, patient_access_role(user)
 
 
 def build_error_response(error, message="An Error Occurred", code=500):

@@ -4,8 +4,8 @@ Compare the legacy EID API (openldr-api, api-ts.openldr.org.mz) with api_openldr
     python -m tools.eid_parity_check --legacy https://api-ts.openldr.org.mz \\
         --python https://dev.openldr.org.mz --token-file token.txt [--year 2025] [--lab PMB="Lab name"]
 
-token.txt holds a token from POST /auth/login on the Python API (valid for 60 minutes); it is
-never printed. The legacy API is public. ``--lab CODE=NAME`` adds the lab-filtered checks: the
+token.txt holds a token from POST /auth/login on the Python API (valid for 60 minutes), logged
+in as a service account (tools/create_service_account.py); it is never printed. The legacy API is public. ``--lab CODE=NAME`` adds the lab-filtered checks: the
 Python API filters a lab by code, the legacy by name, so give both (the name exactly as the
 legacy stores it, e.g. its TestingFacilityName / ReceivingFacilityName).
 

@@ -357,6 +357,13 @@ Key query builder helpers used across all modules:
   decorator for dictionaries; a path-policy helper alone is not an HTTP gate.
   Do not elevate legacy stored roles through normalisation at request time.
   Preserve Admin restrictions on patients and privileged facility drill-downs.
+- `/usage/*` and `/admin/audit` skip the stored-role path policy (they belong to no
+  dashboard): their controllers check the event's dashboard or the Clerk `admin` claim.
+  The patient rule still applies. Service accounts (`tools/create_service_account.py`,
+  `svc-NAME`, listed in `API_SERVICE_ACCOUNTS`) are stored with role `global`: read-only
+  reports, never patients or usage reports.
+- Clerk-claim permissions (`utilities/permissions.py`) are checked after the stored role,
+  only with `PERMISSIONS_ENFORCED=1`.
 - Clerk profile sync must preserve the local role/password. Administrative role
   updates may omit both password fields to retain the existing hash. See the
   [role access matrix](docs/access-control.md) for routes and rollout requirements.

@@ -33,7 +33,7 @@ Usage example::
 
 import copy
 
-from flask import current_app, request, session
+from flask import current_app, g, request, session
 from functools import wraps
 from flask_restful import reqparse
 from sqlalchemy.exc import DBAPIError
@@ -43,6 +43,12 @@ import logging
 
 from db.database import db
 from utilities import report_cache
+from utilities.permissions import (
+    dashboard_for_path,
+    forbidden_response as permission_forbidden_response,
+    permissions_enforced,
+    permissions_for_token,
+)
 from auth.auth_service import get_user_by_id_service
 from auth.roles import role_can_access_path
 from utilities.service_helpers import InvalidParameter
@@ -143,6 +149,14 @@ def _request_route():
     return request.url_rule.rule if request.url_rule is not None else "<unmatched>"
 
 
+_SELF_AUTHORIZED_PREFIXES = ("/usage", "/admin/audit")
+
+
+def _authorizes_itself(path):
+    """Routes whose controller does its own authorization (see usage/controller.py)."""
+    return any(path == p or path.startswith(p + "/") for p in _SELF_AUTHORIZED_PREFIXES)
+
+
 def authenticate_request():
     """
     Verify the JWT, resolve its subject's persisted role and authorize the route.
@@ -180,18 +194,31 @@ def authenticate_request():
     if user is None:
         return None, unauthorized_response()
     role = user.role
-    if not role_can_access_path(role, request.path):
-        return None, forbidden_response()
-    if role != "Admin" and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        suggestion_paths = {
-            "/hiv/send-suggestion", "/hiv/vl/send-suggestion", "/hiv/eid/send-suggestion",
-            "/tb/send-suggestion", "/tb/gx/send-suggestion", "/tb/cultura/send-suggestion",
-        }
-        if request.method != "POST" or request.path.rstrip("/") not in suggestion_paths:
+    # Usage tracking and the admin reports belong to no dashboard: their controllers check the
+    # body's dashboard or the admin claim themselves, so the stored-role path policy skips them.
+    if not _authorizes_itself(request.path):
+        if not role_can_access_path(role, request.path):
             return None, forbidden_response()
+        if role != "Admin" and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            suggestion_paths = {
+                "/hiv/send-suggestion", "/hiv/vl/send-suggestion", "/hiv/eid/send-suggestion",
+                "/tb/send-suggestion", "/tb/gx/send-suggestion", "/tb/cultura/send-suggestion",
+            }
+            if request.method != "POST" or request.path.rstrip("/") not in suggestion_paths:
+                return None, forbidden_response()
     # Preserve the existing restriction on identifiable patient searches.
     if "patients" in request.path.strip("/").split("/") and role != "Admin":
         return None, forbidden_response()
+
+    # Clerk-claim permissions (dashboards, patientData, admin); only enforced with PERMISSIONS_ENFORCED.
+    g.permissions = permissions_for_token(token_payload)
+    if permissions_enforced():
+        # An API token (no ``iss``) is accepted only for a listed service account.
+        if not token_payload.get("iss") and not g.permissions.service:
+            return None, unauthorized_response()
+        dashboard = dashboard_for_path(request.path)
+        if dashboard is not None and dashboard not in g.permissions.dashboards:
+            return None, permission_forbidden_response()
 
     user_info = get_user_token_info(token_payload)
     user_info.update(user_id=user_id, role=role)
@@ -358,6 +385,15 @@ def run_reporting_endpoint(parse_fn, service_fn):
         return {"status": "error", "code": 500, "message": GENERIC_SERVER_ERROR}, 500
 
     response = service_result_response(result)
+    if not isinstance(response, tuple):
+        try:
+            # Imported here: usage.* imports utilities, so a module-level import would be circular.
+            from usage.service import is_patient_request, log_patient_access, count_rows
+
+            if is_patient_request(request.path, dict(request.args.lists())):
+                log_patient_access(user_id, request.path, count_rows(response))
+        except Exception:
+            logger.exception("Patient access logging failed on %s", request.path)
     # Errors come back as (body, code); only a successful report is cached.
     if cache_key is not None and not isinstance(response, tuple):
         try:

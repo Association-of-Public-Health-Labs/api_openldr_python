@@ -7,12 +7,18 @@ from auth.roles import CANONICAL_ROLES, normalize_role
 from uuid import uuid4
 from datetime import datetime, timedelta
 from db.database import db
-from flask import session
+from flask import request, session
+from utilities.permissions import permissions_enforced, service_account_names
 from configs.paths import *
 
 # from configs.paths_local import *
 
 logger = logging.getLogger(__name__)
+
+# Checked when a login names no usable account, so a miss costs the same bcrypt time as a wrong secret.
+_DUMMY_HASH = None
+
+_INVALID_CREDENTIALS = {"status": 401, "error": "Unauthorized", "message": "Invalid credentials"}
 
 
 # =============================================================================
@@ -64,8 +70,52 @@ def _build_user_data(user) -> dict:
     }
 
 
+def _caller_context() -> dict:
+    """IP (X-Forwarded-For, else the socket peer) and user agent of the request being served."""
+    try:
+        return {
+            "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+            "user_agent": request.headers.get("User-Agent"),
+        }
+    except RuntimeError:
+        return {}
+
+
+def _secret_matches(secret, hashed) -> bool:
+    """
+    bcrypt check that never raises (bcrypt refuses secrets over 72 bytes). With no hash it still
+    spends the bcrypt time, against a dummy, and answers False.
+    """
+    global _DUMMY_HASH
+    if hashed is None and _DUMMY_HASH is None:
+        _DUMMY_HASH = _hash_password("dummy")
+    try:
+        matched = bcrypt.checkpw(secret.encode("utf-8"), (hashed or _DUMMY_HASH).encode("utf-8"))
+    except ValueError:
+        return False
+    return matched and hashed is not None
+
+
+def uses_service_login(login_username):
+    """True when the login follows the service-account rules: enforcement on, or a listed name."""
+    return permissions_enforced() or (isinstance(login_username, str) and login_username in service_account_names())
+
+
+def _service_login_user(login_username):
+    """The row of a listed service account (name and ``svc-NAME`` id); None for an unlisted name or a missing row."""
+    if login_username in service_account_names():
+        return User.query.filter_by(user_name=login_username, user_id=f"svc-{login_username}").first()
+    return None
+
+
 def login_user_service(args):
-    """Authenticate one unambiguous account using its bcrypt password hash."""
+    """
+    Authenticate one unambiguous account using its bcrypt password hash.
+
+    A listed service account (or any login once PERMISSIONS_ENFORCED is on) follows the
+    service-account rules: only rows ``svc-NAME`` of names in API_SERVICE_ACCOUNTS, and the
+    same answer and bcrypt time for an unlisted name, a missing row and a wrong secret.
+    """
     raw_username = args.get("username")
     raw_email = args.get("email")
     login_password = args.get("password")
@@ -95,34 +145,43 @@ def login_user_service(args):
             400, "Bad Request", "Password exceeds bcrypt's 72-byte limit"
         )
 
-    invalid = _error_response(401, "Unauthorized", "Invalid credentials")
+    service_login = uses_service_login(login_username)
+    invalid = dict(_INVALID_CREDENTIALS)
     try:
-        identifiers = {}
-        if login_username:
-            identifiers["user_name"] = login_username
-        if login_email:
-            identifiers["email"] = login_email
-        # When both identifiers are supplied they must identify the same row.
-        # Duplicates must never select an arbitrary account through .first().
-        matches = (
-            User.query.populate_existing()
-            .filter_by(is_active=True, **identifiers)
-            .limit(2)
-            .all()
-        )
-        if len(matches) != 1:
-            return invalid
-        user = matches[0]
-        if login_password == user.user_id:
-            return invalid
-        try:
-            password_matches = bcrypt.checkpw(
-                password_bytes, user.password.encode("utf-8")
+        if service_login:
+            candidate = _service_login_user(login_username) if login_username else None
+            if candidate is not None and getattr(candidate, "is_active", True) is False:
+                candidate = None
+            if not _secret_matches(login_password, candidate.password if candidate else None):
+                return invalid
+            user = candidate
+        else:
+            identifiers = {}
+            if login_username:
+                identifiers["user_name"] = login_username
+            if login_email:
+                identifiers["email"] = login_email
+            # When both identifiers are supplied they must identify the same row.
+            # Duplicates must never select an arbitrary account through .first().
+            matches = (
+                User.query.populate_existing()
+                .filter_by(is_active=True, **identifiers)
+                .limit(2)
+                .all()
             )
-        except (ValueError, TypeError, AttributeError):
-            return invalid
-        if not password_matches:
-            return invalid
+            if len(matches) != 1:
+                return invalid
+            user = matches[0]
+            if login_password == user.user_id:
+                return invalid
+            try:
+                password_matches = bcrypt.checkpw(
+                    password_bytes, user.password.encode("utf-8")
+                )
+            except (ValueError, TypeError, AttributeError):
+                return invalid
+            if not password_matches:
+                return invalid
 
         user_data = {
             "user_id": user.user_id,
@@ -159,7 +218,7 @@ def login_user_service(args):
                             "email": user.email,
                         },
                         "message": "Login successful",
-                        "context": {},
+                        "context": _caller_context(),
                     }
                 ),
             )
