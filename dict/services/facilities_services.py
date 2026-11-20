@@ -34,7 +34,6 @@ def get_all_facilities():
         )
     )
 
-    print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
     data = query.all()
 
@@ -88,7 +87,6 @@ def get_facilities_by_province(req_args):
         )
     )
 
-    print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
     data = query.all()
 
@@ -149,7 +147,6 @@ def get_facilities_by_district(req_args):
 
         data = query.all()
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
         response = [
             dict(

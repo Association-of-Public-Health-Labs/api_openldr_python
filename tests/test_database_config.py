@@ -22,6 +22,7 @@ def load_config(monkeypatch, tmp_path):
         "CDR_DOMAIN", "LOCAL_DOMAIN", "CLOUD_DOMAIN", "DB_USER", "DB_PASSWORD",
         "DB_VL_DATA", "DB_DPI", "DB_HIV_AD", "DB_TB_DATA", "DB_DICT",
         "DB_USERS", "DB_REPORT_DATA", "SQL_ODBC_POOLING",
+        "REPORT_DATA_HOST", "REPORT_DATA_USER", "REPORT_DATA_PASSWORD",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -164,3 +165,145 @@ def test_report_data_falls_back_to_the_main_server_and_login(load_config, monkey
     report = _odbc(load_config("Linux")["SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ"]["reportData"])
     assert "SERVER=main.example.test;" in report
     assert "UID=main_user;" in report and "PWD=main_pwd;" in report
+
+
+def test_report_data_can_be_selected_without_main_database_settings(load_config, monkeypatch):
+    for name, value in {
+        "DB_REPORT_DATA": "ReportData", "REPORT_DATA_HOST": "reports.example.test",
+        "REPORT_DATA_USER": "report_user", "REPORT_DATA_PASSWORD": "report_pwd",
+    }.items():
+        monkeypatch.setenv(name, value)
+    binds = load_config()["get_sqlalchemy_binds"]("cdr", ["reportData"])
+    assert list(binds) == ["reportData"]
+    assert "SERVER=reports.example.test;" in _odbc(binds["reportData"])
+    assert "UID=report_user;PWD=report_pwd;" in _odbc(binds["reportData"])
+
+
+def test_empty_report_data_overrides_use_main_settings_instead_of_ini(load_config, monkeypatch):
+    for name, value in {
+        "CDR_DOMAIN": "main.example.test", "DB_USER": "main_user",
+        "DB_PASSWORD": "main_pwd", "DB_REPORT_DATA": "ReportData",
+        "REPORT_DATA_HOST": "", "REPORT_DATA_USER": "", "REPORT_DATA_PASSWORD": "",
+    }.items():
+        monkeypatch.setenv(name, value)
+    settings = load_config(content=(
+        "[Databases]\nreport_data_host=ini.example.test\n"
+        "report_data_user=ini_user\nreport_data_password=ini_pwd\n"
+    ))
+    connection = _odbc(settings["get_sqlalchemy_binds"]("cdr", ["reportData"])["reportData"])
+    assert "SERVER=main.example.test;" in connection
+    assert "UID=main_user;PWD=main_pwd;" in connection
+    assert "ini_" not in connection
+    assert "ini.example.test" not in connection
+
+
+@pytest.mark.parametrize("domain,host_variable", [
+    ("local", "LOCAL_DOMAIN"), ("cdr", "CDR_DOMAIN"), ("cloud", "CLOUD_DOMAIN"),
+])
+def test_selected_environment_controls_main_and_report_data_hosts(
+    load_config, monkeypatch, domain, host_variable
+):
+    for name, value in {
+        host_variable: "selected.example.test", "DB_USER": "api_user",
+        "DB_PASSWORD": "api_pwd", "DB_VL_DATA": "ViralLoadData",
+        "DB_REPORT_DATA": "ReportData",
+    }.items():
+        monkeypatch.setenv(name, value)
+    binds = load_config()["get_sqlalchemy_binds"](domain, ["vl", "reportData"])
+    assert list(binds) == ["vl", "reportData"]
+    for url in binds.values():
+        assert "SERVER=selected.example.test;" in _odbc(url)
+
+
+@pytest.mark.parametrize("secret,escaped", [
+    ("{secret", "{{secret}"),
+    ("secret}value", "{secret}}value}"),
+    (" secret value ", "{ secret value }"),
+])
+def test_odbc_preserves_braces_and_password_whitespace(load_config, secret, escaped):
+    connection = load_config()["build_odbc_connection_string"]("user", secret, "sql.test", "vl")
+    assert f"PWD={escaped};" in connection
+
+
+@pytest.mark.parametrize("domain,bind_keys", [
+    ("unknown", ["vl"]), ("cdr", ["unknown"]), ("cdr", "vl"),
+])
+def test_unknown_environment_or_bind_is_rejected_without_connection_details(
+    load_config, domain, bind_keys
+):
+    with pytest.raises(ValueError, match="SQL"):
+        load_config()["get_sqlalchemy_binds"](domain, bind_keys)
+
+
+def test_connection_check_does_not_print_driver_exception_details(
+    load_config, monkeypatch, capsys
+):
+    from scripts import check_mssql_connection
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.engine import URL
+    from unittest.mock import Mock
+
+    load_config()
+    sensitive = "PWD={secret;remaining}}value};UID=private_user;"
+    monkeypatch.setattr(check_mssql_connection, "get_sqlalchemy_binds", lambda *args, **kwargs: {
+        "vl": URL.create("mssql+pyodbc", query={"odbc_connect": sensitive}),
+    })
+    monkeypatch.setattr(check_mssql_connection, "_check_bind", Mock(side_effect=SQLAlchemyError(sensitive)))
+    monkeypatch.setattr("sys.argv", ["check_mssql_connection.py", "--bind", "vl"])
+    assert check_mssql_connection.main() == 1
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert "SQLAlchemyError" in output
+    assert "secret" not in output
+    assert "remaining" not in output
+    assert "private_user" not in output
+
+
+@pytest.mark.parametrize("driver_message", [
+    "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]"
+    "Logon failed for login 'private_user' due to trigger execution. "
+    "(17892) (SQLDriverConnect); [42000] [Microsoft][ODBC Driver 18 for SQL Server]"
+    "[SQL Server]Changed database context to 'private_db'. (5701)",
+    "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]"
+    "Localized server message for private_user. (17892)",
+])
+def test_connection_check_explains_logon_trigger_failure_without_login_details(
+    load_config, monkeypatch, capsys, driver_message
+):
+    from scripts import check_mssql_connection
+    from sqlalchemy.exc import ProgrammingError
+    from unittest.mock import Mock
+
+    load_config()
+    error = ProgrammingError(None, None, pyodbc.ProgrammingError("42000", driver_message))
+    monkeypatch.setattr(check_mssql_connection, "get_sqlalchemy_binds", lambda *args: {"vl": None})
+    monkeypatch.setattr(check_mssql_connection, "_check_bind", Mock(side_effect=error))
+    monkeypatch.setattr("sys.argv", ["check_mssql_connection.py", "--bind", "vl"])
+
+    assert check_mssql_connection.main() == 1
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert "sqlstate=42000" in output
+    assert "native_error=17892" in output
+    assert "LOGON trigger" in output
+    assert "CDR administrator" in output
+    assert "private_user" not in output
+    assert "private_db" not in output
+    assert "5701" not in output
+
+
+@pytest.mark.parametrize("original, expected", [
+    (pyodbc.Error(), {}),
+    (pyodbc.Error("42000\nPWD=hidden"), {}),
+    (pyodbc.Error("hidden-password", "private details"), {}),
+    (Exception("42000", "private details"), {}),
+    (pyodbc.Error("28000", "Login failed for private_user. (18456)"), {"sqlstate": "28000"}),
+    (pyodbc.Error("42000", "PWD={secret;value (17892)};UID=private_user; (123456)"),
+     {"sqlstate": "42000"}),
+])
+def test_safe_sql_diagnostics_only_return_valid_states_and_known_codes(original, expected):
+    from scripts import check_mssql_connection
+    from sqlalchemy.exc import DBAPIError
+
+    error = DBAPIError(None, None, original)
+    assert check_mssql_connection._safe_sql_error_details(error) == expected

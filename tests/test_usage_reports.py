@@ -11,6 +11,12 @@ from usage.models import AdminAuditLog, PatientAccessLog, UsageEvent
 from utilities import token_verification as tv
 from utilities.permissions import forbidden_response
 
+@pytest.fixture(autouse=True)
+def clerk_subject_exists(persisted_user):
+    """authenticate_request looks the token's subject up in the users table; the Clerk test token's is user_abc."""
+    persisted_user(role="Admin", user_id="user_abc")
+
+
 REPORTS = ["summary", "active_users_by_month", "by_dashboard", "top_users", "top_pages", "patient_access"]
 RANGE = "2026-11-01,2026-11-30"
 
@@ -237,3 +243,24 @@ def test_audit_requires_admin(app, client, monkeypatch, flag):
     assert response.status_code == 403
     assert audit_rows(app) == []
     assert client.post("/admin/audit", json={"action": "a", "target_user_id": "t"}).status_code == 401
+
+
+@pytest.mark.parametrize("role", ["vl", "global"])
+def test_admin_claim_decides_whatever_the_stored_role(app, client, role):
+    from auth.user_model import User
+
+    with app.app_context():
+        User.query.filter_by(user_id="user_abc").update({"role": role})
+        db.session.commit()
+    assert get(client, "summary").status_code == 200
+    assert get(client, "summary", headers=bearer(admin=False)).status_code == 403
+
+
+def test_stored_role_policy_still_guards_dashboards(app, client):
+    """The /usage exemption does not leak to report routes: an unassigned stored role gets 403 there."""
+    from auth.user_model import User
+
+    with app.app_context():
+        User.query.filter_by(user_id="user_abc").update({"role": "user"})
+        db.session.commit()
+    assert client.get("/hiv/vl/summary/tat_by_month/", headers=bearer()).status_code == 403

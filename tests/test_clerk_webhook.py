@@ -25,7 +25,7 @@ CLERK_USER = {
 }
 DB_USER = SimpleNamespace(
     user_id="user_abc", user_name="Ana_Silva", first_name="Ana",
-    last_name="Silva", email="ana@openldr.org.mz", role="Admin",
+    last_name="Silva", email="ana@openldr.org.mz", role="Admin", is_active=True,
 )
 
 
@@ -71,16 +71,21 @@ def mocked_services():
          patch("auth.auth_controller.save_user_log_service") as save_log, \
          patch("auth.auth_controller.delete_user_service",
                return_value={"message": "deleted", "data": None, "token": "eyJdeleted"}) as delete, \
-         patch("auth.auth_controller.create_user_service",
+         patch("auth.auth_controller.provision_clerk_user_service",
                return_value={"message": "created", "data": {"user_id": "user_abc"},
                              "token": "eyJcreated"}) as create, \
-         patch("auth.auth_controller.update_user_service",
+         patch("auth.auth_controller.create_user_service",
+               side_effect=AssertionError("Webhook must use Clerk provisioning")) as admin_create, \
+         patch("auth.auth_controller.sync_clerk_user_service",
                return_value={"message": "updated", "data": None, "token": "eyJupdated"}) as update, \
+         patch("auth.auth_controller.update_user_service",
+               side_effect=AssertionError("Webhook must preserve locally assigned permissions")) as admin_update, \
          patch("auth.auth_controller.logout_user_service",
                return_value={"message": "logged out", "data": None, "token": "eyJlogout"}) as logout:
         yield SimpleNamespace(fetch=fetch, get_user=get_user, last_login=last_login,
                               save_log=save_log, delete=delete, create=create,
-                              update=update, logout=logout)
+                              update=update, logout=logout, admin_create=admin_create,
+                              admin_update=admin_update)
 
 
 def assert_rejected(response, mocked_services):
@@ -89,6 +94,10 @@ def assert_rejected(response, mocked_services):
     mocked_services.fetch.assert_not_called()
     mocked_services.delete.assert_not_called()
     mocked_services.get_user.assert_not_called()
+    mocked_services.create.assert_not_called()
+    mocked_services.admin_create.assert_not_called()
+    mocked_services.update.assert_not_called()
+    mocked_services.admin_update.assert_not_called()
 
 
 def test_no_svix_headers_rejected(client, webhook_secret, mocked_services):
@@ -172,3 +181,4 @@ def test_valid_events_dispatch_and_never_return_token(client, webhook_secret, mo
     assert not _contains_token(response.get_json())
     assert "eyJ" not in response.get_data(as_text=True)
     getattr(mocked_services, service).assert_called_once()
+    mocked_services.admin_update.assert_not_called()

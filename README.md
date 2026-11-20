@@ -2,6 +2,13 @@
 
 A RESTful API for epidemiological and laboratory reporting, with endpoints for Tuberculosis (TB) GeneXpert, HIV Viral Load (VL), HIV EID, dictionary data, and user authentication.
 
+**Current code version: 2.0.0.** The release number and highlights are displayed in
+Swagger at `/apidocs/` and in `info.version` at `/apispec_1.json`. See the
+[changelog](CHANGELOG.md) for changes and compatibility notes. Production rollout
+requires SQL Server migration validation and application of the
+[user deactivation migration](sql/auth/001_add_user_is_active.sql) before deploying
+the new API version; see the [deployment guide](docs/user-deactivation.md).
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -14,14 +21,17 @@ A RESTful API for epidemiological and laboratory reporting, with endpoints for T
   - [HIV Viral Load Endpoints](#hiv-viral-load-endpoints)
   - [HIV EID Endpoints](#hiv-eid-endpoints)
   - [Dictionary Endpoints](#dictionary-endpoints)
+- [Release history and versioning](CHANGELOG.md)
 - [Common Parameters](#common-parameters)
 - [Pagination](#pagination)
 - [Authentication](#authentication)
+- [Dashboard roles and access matrix](docs/access-control.md)
 - [Doubts and suggestions](docs/suggestions.md)
 - [Getting Started](#getting-started)
 - [Deployment](#deployment)
 - [Environment Setup](#environment-setup)
 - [Testing](#testing)
+- [Priority improvement stages](docs/priority-improvements.md)
 - [Troubleshooting](#troubleshooting)
 - [Error Handling](#error-handling)
 
@@ -115,11 +125,11 @@ See [Doubts and suggestions](docs/suggestions.md) for the payload, authenticatio
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| `POST` | `/auth/login` | Login with username and password, returns JWT token | No |
+| `POST` | `/auth/login` | Login with username or email and local password, returns JWT token | No |
 | `POST` | `/auth/create` | Create a new user (Admin only) | Yes (JWT) |
 | `PUT` | `/auth/update` | Update user details (Admin only) | Yes (JWT) |
-| `DELETE` | `/auth/delete` | Delete a user (Admin only) | Yes (JWT) |
-| `GET` | `/auth/users` | Get all users (Admin only) | Yes (JWT) |
+| `DELETE` | `/auth/delete` | Logically deactivate a user (active Admin only) | Yes (JWT) |
+| `GET` | `/auth/users` | List active users (active Admin only) | Yes (JWT) |
 | `POST` | `/auth/clerk` | Clerk webhook handler for external auth events | No (Webhook) |
 
 #### Clerk Webhook Events
@@ -130,7 +140,7 @@ The `/auth/clerk` endpoint handles the following Clerk events:
 - **`session.removed`** / **`session.ended`** — Logs out the user
 - **`user.created`** — Creates a new user from Clerk data
 - **`user.updated`** — Updates user info from Clerk data
-- **`user.deleted`** — Deletes the user
+- **`user.deleted`** — Logically deactivates the local user, preserving history
 
 ### Tuberculosis GeneXpert Endpoints
 
@@ -407,11 +417,25 @@ The API uses **JWT (JSON Web Tokens)** for authentication with two integration p
 
 ### Direct Login
 
+Send `username` **or** `email` with the existing local password. If both
+identifiers are sent, they must match the same unique local account. The API
+checks the stored bcrypt hash; `user_id` is an identity, never a password.
+
 ```bash
 curl -X POST http://localhost:5000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "your_password"}'
 ```
+
+Email-only example: `{"email": "admin@example.com", "password": "your_password"}`.
+An identifier shared by multiple accounts returns HTTP 401; use a unique
+username, or both identifiers if the pair is unique. No accounts are selected
+arbitrarily or merged automatically. Identifiers are trimmed; password whitespace
+is significant. Passwords must fit bcrypt's 72 UTF-8 byte limit.
+
+Missing/non-string credentials return HTTP 400, incorrect or ambiguous
+credentials return HTTP 401, and internal failures return a generic HTTP 500.
+Login time and audit are saved together only after token creation succeeds.
 
 The response includes a JWT token:
 
@@ -444,15 +468,91 @@ curl -H "Authorization: Bearer eyJhbGciOi..." \
 
 The API supports [Clerk](https://clerk.com/) as an external identity provider via webhook events at `/auth/clerk`. When a user authenticates through Clerk:
 
-1. **New users** are automatically created in the local database
-2. **Existing users** receive a new JWT access token
-3. **User updates/deletions** from Clerk are synced to the local database
-4. All events are logged to the `UserLogs` table
+1. **New users** are provisioned in the local database with the standard `user` role, after Svix signature verification
+2. **Existing active users** have their session recorded; the webhook never issues an API access token
+3. **User updates/deletions** from Clerk are synced without reactivating disabled local accounts
+4. Successful events use `UserLogs`; deactivation and its audit share one transaction and are recorded once per state change
+
+Clerk RS256 bearer tokens and Svix webhook verification remain independent of
+local password login. Local login does not call Clerk. New Clerk accounts are
+provisioned with a random local secret, rather than their public `user_id`; an
+Admin can assign a local password later. Existing passwords and roles are
+preserved on session/profile events. Legacy accounts whose local password was
+their public identifier cannot use that value for local login and need an Admin
+password update; their Clerk authentication continues to work.
 
 ### Roles
 
-- **Admin** — Full access to all endpoints, including patient data and user management
-- **user** — Standard access (default role for Clerk-provisioned users)
+- **vl**, **dpi**, **tb_gx**, **tb_cl**, **ad** — Reports for the assigned subdivision.
+- **global** — Reports across all subdivisions, without user-management privileges.
+- **Admin** — All report access, existing privileged patient views and user management.
+- **user** — Unassigned legacy/provisioning role; an Admin must assign a subdivision before report access.
+
+Each account has one stored role. `dpi` uses the existing `/hiv/eid/*` URLs,
+`tb_gx` uses `/tb/gx/*`, and `tb_cl` uses `/tb/cultura/*`. AD permissions reserve
+`/hiv/ad/*`; they do not create AD endpoints. The API checks the stored role on
+each request, before the report cache, using the verified JWT subject. A role
+claim in a token cannot override the local account. Cross-subdivision requests
+return 403. Shared `/dict/*` endpoints now require an authenticated, assigned role.
+
+Existing Admin restrictions on patient searches, VL single-facility aggregates
+and drill-downs returning individual records are preserved. See the
+[access matrix and assignment procedure](docs/access-control.md), including
+the rollout step for existing `user` accounts. Swagger remains full public
+documentation; access to the documented data is enforced separately.
+
+### Creating users
+
+`POST /auth/create` requires an API JWT and an active caller whose stored role
+is exactly `Admin`. A role claimed in the JWT or supplied in the request does
+not grant this permission. Missing/inactive local accounts return HTTP 401;
+other stored roles return HTTP 403 before any user is created.
+
+The existing required fields remain `username`, `first_name`, `last_name`,
+`password`, `confirm_password`, `email` and `role`. Supported roles are `Admin`,
+`global`, `vl`, `dpi`, `tb_gx`, `tb_cl`, `ad` and unassigned `user`. Input is
+normalised case-insensitively and surrounding whitespace is ignored. Unsupported roles and
+invalid creation data return HTTP 400. Existing stored roles are unchanged.
+Successful creation retains HTTP 200 and the existing response payload.
+Unexpected creation failures return HTTP 500 with a generic message.
+
+The signed Clerk webhook uses a separate internal provisioning service that
+always assigns `user`, without requiring an existing local Admin. The public
+creation endpoint cannot select this path through request fields. Signed Clerk
+profile updates preserve locally assigned roles and passwords. Admin can assign
+roles through `PUT /auth/update` while omitting both password fields to keep the
+existing password. The local
+login and Clerk credential validation is recorded as stage 3 in the
+[priority improvement record](docs/priority-improvements.md).
+
+### Deactivating users
+
+Apply the [SQL Server 2014 migration](sql/auth/001_add_user_is_active.sql) manually
+**before deploying this API version**, then run the
+[read-only verification](sql/auth/002_verify_user_is_active.sql). It adds
+`Utils.dbo.openldr_api_user_users.is_active BIT NOT NULL` with
+`DF_openldr_api_user_users_is_active DEFAULT (1)`. Existing accounts become
+active on first application; reapplying preserves saved inactive states and
+timestamps. The model uses the declared `user_id NVARCHAR(50)` primary key,
+retains the legacy numeric `id` and maps `is_active` to a boolean.
+
+`DELETE /auth/delete` keeps its existing Admin permission, HTTP 200 and success
+payload, including the legacy message `User deleted successfully`. It now sets
+`is_active = 0` and `updated_at` only where the target `user_id` is active. A retry
+by an active Admin succeeds without changing that timestamp or adding another
+transition audit. No row or audit history is physically removed.
+
+Password login accepts active accounts only and uses the same generic 401 for
+inactive/invalid credentials. Every protected request rechecks account existence
+and state in the database, before report cache or business services. API and
+Clerk JWTs issued before deactivation are refused on the next request after
+commit. There is no local refresh endpoint; refresh tokens cannot be used as
+access tokens. Operational lists/lookups hide inactive accounts; internal
+history lookups may explicitly include them without exposing a public bypass.
+
+The [deactivation and deployment guide](docs/user-deactivation.md) contains the
+file inventory, audit behaviour, tests, SQL Server validation still required,
+and the publication order. No production migration is executed automatically.
 
 ## Getting Started
 
@@ -486,10 +586,10 @@ The API supports [Clerk](https://clerk.com/) as an external identity provider vi
 
 4. Configure the application:
    - Configuration is loaded from `configs/paths.py`.
-   - **Windows**: values are read from `configs/configs.ini`.
-   - **Linux**: values are read from environment variables.
-   - In `app.py`, choose the active SQLAlchemy bind dictionary (currently `SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ`).
-   - Ensure `FLASK_SECRET_KEY` (Linux) or `Flask.secret_key` (Windows), database credentials, and Clerk settings are configured.
+   - On Windows and Linux, process environment variables override `configs/configs.ini`; the INI supplies unset values.
+   - Copy `configs/configs.ini.example` to `configs/configs.ini` or set the variables listed in `.env.example` in the service/container environment.
+   - The app uses `get_sqlalchemy_binds("cdr")` and validates the active SQL configuration before creating its engines.
+   - Ensure the Flask secret, database credentials, and Clerk settings are configured. Python does not automatically load `.env` files.
 
 5. Run the application:
    ```bash
@@ -521,36 +621,39 @@ docker-compose up --build -d
 
 ## Environment Setup
 
-### Windows configuration (`configs.ini`)
+### Configuration sources (Windows and Linux)
 
-On Windows, `configs/paths.py` reads settings from `configs/configs.ini`.
+`configs/paths.py` reads process environment variables first, then `configs/configs.ini`, then the setting's default. This order applies to SQL, Flask, Clerk and SMTP settings on both platforms. INI values are literal, including `%` in passwords. An explicitly empty environment variable overrides the INI; a required SQL value left empty causes a configuration error.
 
-Set at least:
+Use `configs/configs.ini.example` for the INI keys and `.env.example` for environment names. The Python application does not load `.env` automatically. Docker Compose reads it when configured through `env_file`; for Waitress/NSSM set service environment variables or fill the INI and restart the service.
 
-- `Flask.secret_key`
-- `Domains.local`, `Domains.cdr`, `Domains.cloud`, `Domains.tb`
-- `Databases.database_user`, `Databases.database_password`
-- `Databases.ViralLoadData`, `Databases.Dpi`, `Databases.HivAdvancedDisease`, `Databases.TBData`, `Databases.Dictionary`, `Databases.Users`, `Databases.ReportData`
-- `Schemas.cdr_schema`
-- `Clerk.clerk_webhook_secret`, `Clerk.secret_key`, `Clerk.api_endpoint`, `Clerk.clerk_jwts_url`, `Clerk.clerk_issuer`, `Clerk.clerk_public_key`
+The CDR configuration used by `app.py` requires:
 
-`Databases.ReportData` / `DB_REPORT_DATA` is the ReportData database (weekly VL lab reports, table `Resume`); same SQL Server host and credentials as the other databases. The weekly report endpoints need it.
+| Environment variable | INI section/key |
+| --- | --- |
+| `CDR_DOMAIN` | `[Domains] cdr` |
+| `DB_USER`, `DB_PASSWORD` | `[Databases] database_user`, `database_password` |
+| `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD` | `[Databases] ViralLoadData`, `Dpi`, `HivAdvancedDisease` |
+| `DB_TB_DATA`, `DB_DICT`, `DB_USERS` | `[Databases] TBData`, `Dictionary`, `Users` |
+| `DB_REPORT_DATA` | `[Databases] ReportData` |
 
-For a named SQL Server instance, `Domains.cdr` can include the instance name, for example `disamoz.org.mz\SQLEXPRESS` or `CDR\SQLEXPRESS`.
+Set the Flask secret and the Clerk/SMTP settings required by the enabled features too. Unused local/cloud hosts do not need to be configured for CDR startup.
 
-### Linux configuration (environment variables)
+`get_sqlalchemy_binds("cdr")` validates all seven CDR binds before engines are created. Tools can select fewer, for example `get_sqlalchemy_binds("cdr", ["vl"])`. Supported environments are `local`, `cdr` and `cloud`. Errors identify missing setting names without printing credentials. The historical `SQLALCHEMY_BINDS_*` dictionaries remain available and contain only completely configured binds; application startup and the connection checker use the validated getter.
 
-On Linux, `configs/paths.py` reads environment variables.
+### ReportData and SQL Server hosts
 
-Common variables:
+`DB_REPORT_DATA` / `[Databases] ReportData` selects the reporting database, including the weekly VL `Resume` table. It can use its own server and login:
 
-- `FLASK_SECRET_KEY`
-- `LOCAL_DOMAIN`, `CDR_DOMAIN`, `CLOUD_DOMAIN`, `TB_DASHBOARD_DOMAIN`
-- `DB_USER`, `DB_PASSWORD`, `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS`, `DB_REPORT_DATA`
-- `SCHEMA_CDR`
-- `CLERK_WEBHOOK_SECRET_KEY`, `CLERK_SECRET_KEY`, `CLERK_API_URL`, `CLERK_JWTS_URL`, `CLERK_ISSUER`, `CLERK_PUBLIC_KEY`
+| Environment variable | INI section/key | Empty or unset value |
+| --- | --- | --- |
+| `REPORT_DATA_HOST` | `[Databases] report_data_host` | Selected environment's host |
+| `REPORT_DATA_USER` | `[Databases] report_data_user` | `DB_USER` / `database_user` |
+| `REPORT_DATA_PASSWORD` | `[Databases] report_data_password` | `DB_PASSWORD` / `database_password` |
 
-For Coolify/Docker deployments that use the CDR SQL Server named instance, set `CDR_DOMAIN` to `disamoz.org.mz\SQLEXPRESS` when connecting from outside the server network, or `CDR\SQLEXPRESS` when the container can resolve the internal host. If SQLEXPRESS is configured with a fixed TCP port, use `host,port` instead, for example `disamoz.org.mz,14330`, and do not include `\SQLEXPRESS`.
+These three optional overrides keep their existing fallback behaviour. Selecting only `reportData` with its own host and credentials does not require the main SQL settings.
+
+For a named instance, use `sql.example.test\SQLEXPRESS`. For a fixed TCP port, use `tcp:sql.example.test,1433` without the instance suffix. The configured hostname must resolve from the service/container network.
 
 ### Database/driver notes
 
@@ -559,9 +662,11 @@ For Coolify/Docker deployments that use the CDR SQL Server named instance, set `
 - ODBC encryption is enabled with `Encrypt=yes` and `TrustServerCertificate=yes`.
 - MARS is disabled with `MARS_Connection=No`.
 - The application name sent to SQL Server is `OpenLDR API`.
-- ODBC pooling is not disabled by default. For diagnostics only, set `SQL_ODBC_POOLING=false` to add `Pooling=No` to the ODBC connection string.
-- SQLAlchemy pooling stays enabled by default with `pool_pre_ping=True`, `pool_recycle=1800`, and a command timeout from `SQL_QUERY_TIMEOUT` (default `180`). For diagnostics only, set `SQLALCHEMY_DISABLE_POOLING=true` to use `NullPool`.
-- Test the active CDR bind with `python scripts/check_mssql_connection.py`. The script prints `@@SERVERNAME`, `@@SERVICENAME`, and `DB_NAME()` without printing credentials.
+- ODBC values containing delimiters, braces or surrounding spaces are escaped while preserving their contents.
+- ODBC pooling is enabled by default. For diagnostics, `SQL_ODBC_POOLING=false` sets the process-wide `pyodbc.pooling` before connections are opened. No `Pooling` or `Connection Timeout` attribute is added to the ODBC string.
+- SQLAlchemy pooling is independent and stays enabled by default with `pool_pre_ping=True` and `pool_recycle=1800`. Set `SQLALCHEMY_DISABLE_POOLING=true` to use `NullPool`.
+- The existing `SQL_QUERY_TIMEOUT` variable (default `180`) is passed to `pyodbc.connect(timeout=...)` through SQLAlchemy. It controls connection/login timeout, despite its historical name; it does not configure statement execution timeout.
+- Check the selected CDR databases with `python scripts/check_mssql_connection.py --bind vl` (or `--bind all` for VL, EID and TB). The script validates configuration first, then reads server identity and row counts, printing progress before connecting, checking SQL and counting rows. Failures return exit code 1 and print the error class, SQLSTATE and fixed guidance for recognised errors, without driver exception text or credentials. Error 17892 means login failed during LOGON trigger execution and needs investigation by the CDR administrator. The displayed `login_timeout` comes from `SQL_QUERY_TIMEOUT`; it does not limit row-count execution time.
 - Confirm network access to the configured SQL Server hosts.
 
 ## Testing
@@ -570,14 +675,19 @@ The repository includes pytest tests in `tests/`.
 
 ```bash
 # Unit-style utility tests
-pytest tests/test_utils.py
+python -m pytest tests/test_utils.py
+
+# SQL configuration and application route registration (no SQL Server needed)
+python -m pytest tests/test_database_config.py tests/tb/test_tb_cultura_api_module.py -q
 
 # Full test suite
-pytest tests -q
+python -m pytest -q
 
 # Optional live integration checks (requires DB connectivity)
-pytest tests/test_hiv_endpoints.py -s
+python tests/test_hiv_endpoints.py
 ```
+
+The pytest suite excludes the standalone live script and uses mocks/SQLite; passing it does not verify SQL Server connectivity or production indicator values. Password login, Clerk coexistence and VL access across every registered reporting GET route can be checked with `python -m pytest tests/test_login.py tests/test_vl_role_route_access.py -q`. These checks use synthetic credentials, locally signed tokens and replaced report services. See [priority improvement stages](docs/priority-improvements.md) for the validation record and the separate read-only account check.
 
 ## Troubleshooting
 
@@ -601,21 +711,34 @@ pytest tests/test_hiv_endpoints.py -s
 
 ### Debug Mode
 
-Enable debug mode for detailed error information:
+Use debug mode only in isolated development with synthetic data. Keep it disabled
+when handling clinical requests, along with SQLAlchemy SQL echo:
 
 ```python
 # In app.py
-app.run(debug=True)
+app.run(debug=False)
 ```
 
 ### Logging
 
-Check application logs for detailed error information:
+Reporting diagnostics identify the registered route, HTTP error code and/or
+exception class. They omit exception messages, tracebacks, raw SQL, query
+parameters, patient records and bearer tokens, including values retained in
+logging arguments. Patient services return generic 500 errors and do not print
+queries or search filters. Authorised Admin responses keep their existing data.
 
 ```python
 import logging
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 ```
+
+Investigate using the timestamp, route, status and exception class; reproduce
+failures with synthetic data. Keep SQL echo and SQL parameter logging disabled
+for clinical traffic. Configure proxy/server access logs separately to omit
+query strings and authentication headers, since patient searches use GET filters.
+Existing logs are not removed by this change. See
+[patient log privacy](docs/patient-log-privacy.md) for scope and regression checks.
 
 ## Error Handling
 
@@ -632,20 +755,58 @@ The API uses standard HTTP status codes:
 
 ### Error Response Format
 
+Reporting and dictionary endpoints return the actual HTTP error status. Service
+4xx errors retain their public message; `InvalidParameter` returns HTTP 400.
+Parser validation keeps the existing Flask-RESTful `message` object identifying
+the invalid field. Successful lists and paginated objects keep their current
+shape, including empty results.
+
+All reporting/dictionary 5xx responses contain only this generic envelope:
+
 ```json
 {
-    "status": 500,
-    "error": "Internal Server Error",
-    "message": "Detailed error description"
+    "status": "error",
+    "code": 500,
+    "message": "An error occurred"
 }
 ```
 
-### Patient Service Error Example
+An explicit service/HTTP error such as 503 retains that HTTP status and code;
+unexpected exceptions and invalid service error codes become 500. Internal SQL,
+driver messages, traces and partial data are not included in 5xx responses.
+Authentication endpoints retain their documented `status`/`error`/`message`
+contract.
+
+### Permission Error Example
 
 ```json
 {
     "status": "error",
     "code": 403,
-    "message": "Forbidden - User with id abc123 and role user is not authorized to access this resource."
+    "message": "Access denied for this role"
 }
 ```
+
+### Report Cache and Errors
+
+Authorization uses the current stored role before every cache lookup. The shared
+cache still covers default aggregate VL, EID and TB GX reports; dictionaries,
+TB culture, patient lists and single-facility requests remain live. Existing
+date windows, filter rules and the default 24-hour maximum age are preserved.
+
+Only successful report arrays/objects are stored. Cached error bodies, malformed
+envelopes, mismatched keys, invalid timestamps and expired entries are misses:
+the API calculates the report again. Cache lookup/write failures also fall back
+to the live response. A failed report keeps its real HTTP error status and is
+never stored or returned as a cache hit. Failed atomic writes preserve the
+previous entry and clean up temporary files.
+
+`X-Report-Cache: HIT` means a validated cached success was served; `MISS` means a
+successful live result was stored. `X-Report-Computed-At` gives its timestamp.
+Bypassed/unavailable caches and error responses omit these headers. The warm-up
+ignores malformed entries while retaining valid old keys for recomputation.
+No cache purge or database migration is required for this change.
+
+See [reporting errors and cache behaviour](docs/reporting-errors-and-cache.md)
+and [stage 4 validation](docs/priority-improvements.md#etapa-4--erros-http-e-cache)
+for the contract, regression checks and validation limits.

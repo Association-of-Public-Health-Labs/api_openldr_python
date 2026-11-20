@@ -13,6 +13,12 @@ from configs import paths
 from tests.test_token_verification import ISSUER, TB_ORIGIN, make_clerk_token, make_jwks
 from utilities import token_verification as tv
 
+@pytest.fixture(autouse=True)
+def clerk_subject_exists(persisted_user):
+    """authenticate_request looks the token's subject up in the users table; the Clerk test token's is user_abc."""
+    persisted_user(role="Admin", user_id="user_abc")
+
+
 PATIENT_URLS = [
     "/hiv/vl/patients/by_name/",
     "/hiv/eid/patients/by_name/",

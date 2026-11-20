@@ -10,6 +10,12 @@ from utilities import token_verification as tv
 from utilities.permissions import forbidden_response
 from usage.models import UsageEvent
 
+@pytest.fixture(autouse=True)
+def clerk_subject_exists(persisted_user):
+    """authenticate_request looks the token's subject up in the users table; the Clerk test token's is user_abc."""
+    persisted_user(role="Admin", user_id="user_abc")
+
+
 URL = "/usage/events"
 
 
@@ -111,3 +117,16 @@ def test_db_failure_returns_204_and_logs(app, client, clerk_config, monkeypatch,
     assert any("page view" in r.getMessage().lower() for r in caplog.records)
     monkeypatch.undo()
     assert stored(app) == []
+
+
+@pytest.mark.parametrize("role", ["vl", "tb_gx", "user"])
+def test_stored_role_does_not_block_tracking(app, client, clerk_config, role):
+    """Any stored role, even unassigned, may record a page view: the stored-role path policy skips /usage."""
+    from auth.user_model import User
+
+    with app.app_context():
+        User.query.filter_by(user_id="user_abc").update({"role": role})
+        db.session.commit()
+    response = client.post(URL, headers=bearer(), json={"dashboard": "vl", "page": "/lab"})
+    assert response.status_code == 204
+    assert len(stored(app)) == 1

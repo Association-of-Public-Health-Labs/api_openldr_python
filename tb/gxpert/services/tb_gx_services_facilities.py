@@ -564,7 +564,6 @@ def tested_samples_by_month_by_facility_service(req_args):
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
 
-    print(f"Month: {month}, Year: {year}")
 
     # print(dates[1], datetime.fromisoformat(dates[1]).year)
     if year and int(year) > int(datetime.fromisoformat(dates[1]).year):
@@ -1556,7 +1555,6 @@ def tested_samples_by_sample_types_by_facility_service(req_args):
                 .order_by(ColumnNames)
             )
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
         data = query.all()
 
@@ -2002,7 +2000,6 @@ def tested_samples_by_facility_disaggregated_by_drug_type_service(req_args):
                 .order_by(ColumnNames)
             )
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
         data = query.all()
 
@@ -2160,7 +2157,6 @@ def tested_samples_by_facility_disaggregated_by_drug_type_by_age_service(req_arg
                 year=None,
             )
 
-            print(str(query.statement))
 
             data = query.all()
 
@@ -3737,7 +3733,6 @@ def trl_samples_avg_by_facility_service(req_args):
             .order_by(ColumnNames)
         )
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
         data = query.all()
 
@@ -3896,8 +3891,6 @@ def trl_samples_avg_by_facility_month_service(req_args):
 
             data = query.all()
 
-            print(query.statement.compile(
-                compile_kwargs={"literal_binds": True}))
 
             response = process_patients(
                 data, dates, facility_type, gx_result_type, "tb", month, year

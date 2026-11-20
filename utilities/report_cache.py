@@ -153,35 +153,96 @@ def _file(key):
 # --------------------------------------------------------------------------- store
 
 
+def _valid_key(key):
+    """Accept only keys that the report request pipeline can actually produce."""
+    if not isinstance(key, dict) or not isinstance(key.get("path"), str):
+        return False
+    if key.get("window") not in (YEAR, MONTHS) or not isinstance(key.get("params"), dict):
+        return False
+    for name, values in key["params"].items():
+        if not isinstance(name, str) or not isinstance(values, list):
+            return False
+        if not all(isinstance(value, str) for value in values):
+            return False
+    args = {**key["params"], "interval_dates": [window_param(key["window"])]}
+    return cache_key(key["path"], args) == key
+
+
+def _successful_data(data):
+    """Report arrays and paginated objects are cacheable; error bodies never are."""
+    return isinstance(data, (list, dict)) and not (
+        isinstance(data, dict) and data.get("status") == "error"
+    )
+
+
+def _entry_timestamp(entry):
+    """Validate an envelope without its age, so stale reports can still be warmed."""
+    if not isinstance(entry, dict) or not _valid_key(entry.get("key")):
+        return None
+    if not _successful_data(entry.get("data")) or not isinstance(entry.get("computed_at"), str):
+        return None
+    try:
+        computed_at = datetime.fromisoformat(entry["computed_at"])
+    except ValueError:
+        return None
+    return computed_at if computed_at.utcoffset() is not None else None
+
+
 def read(key, now=None):
     """The cached entry ``{"computed_at", "data", ...}`` if present and fresh enough, else None."""
+    if not _valid_key(key):
+        return None
     try:
         with open(_file(key), encoding="utf-8") as fh:
             entry = json.load(fh)
-        computed_at = datetime.fromisoformat(entry["computed_at"])
-    except (OSError, ValueError, KeyError):
-        return None
-    now = now or datetime.now(timezone.utc)
-    if now - computed_at > max_age():
+        computed_at = _entry_timestamp(entry)
+        if computed_at is None or entry["key"] != key:
+            return None
+        now = now or datetime.now(timezone.utc)
+        if not isinstance(now, datetime) or now.utcoffset() is None:
+            return None
+        age = now - computed_at
+        if age < timedelta(0) or age > max_age():
+            return None
+    except (OSError, ValueError, TypeError, OverflowError, RecursionError):
         return None
     return entry
 
 
 def write(key, data, now=None):
     """Store a response atomically (a worker never reads a half-written file)."""
+    if not _valid_key(key) or not _successful_data(data):
+        return None
     now = now or datetime.now(timezone.utc)
+    if not isinstance(now, datetime) or now.utcoffset() is None:
+        return None
     entry = {"key": key, "computed_at": now.isoformat(timespec="seconds"), "data": data}
     directory = cache_dir()
+    fd = None
+    tmp = None
     try:
         os.makedirs(directory, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fd = None  # The file object owns the descriptor from here onward.
             json.dump(entry, fh, default=str)
         os.replace(tmp, _file(key))
-    except (OSError, TypeError, ValueError):
+        tmp = None
+    except (OSError, TypeError, ValueError, OverflowError, RecursionError) as exc:
         # A cache that cannot write must never break the report itself.
-        logger.exception("Report cache: could not store %s", key.get("path"))
+        logger.error("Report cache write failed (%s)", type(exc).__name__)
         return None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
     return entry
 
 
@@ -197,8 +258,11 @@ def stored_keys():
             continue
         try:
             with open(os.path.join(cache_dir(), name), encoding="utf-8") as fh:
-                keys.append(json.load(fh)["key"])
-        except (OSError, ValueError, KeyError):
+                entry = json.load(fh)
+            computed_at = _entry_timestamp(entry)
+            if computed_at is not None and computed_at <= datetime.now(timezone.utc):
+                keys.append(entry["key"])
+        except (OSError, ValueError, TypeError, OverflowError, RecursionError):
             continue
     return keys
 

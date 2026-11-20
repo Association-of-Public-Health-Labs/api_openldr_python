@@ -26,6 +26,7 @@ from auth.routes import authentication_routes
 from suggestions.routes import suggestion_routes
 from usage.routes import usage_routes
 from db.database import db
+from configs import paths as database_config
 from configs.paths import *  # Import all constants from paths module
 from utilities.utils import *  # Import all utility functions
 from utilities.swagger import swagger_template
@@ -115,7 +116,7 @@ def _log_sql_startup_config():
 # Configure the application to use multiple databases
 sqlalchemy_engine_options = _build_sqlalchemy_engine_options()
 app.config["SQLALCHEMY_BINDS"] = _binds_with_engine_options(
-    SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ,
+    database_config.get_sqlalchemy_binds("cdr"),
     sqlalchemy_engine_options,
 )
 

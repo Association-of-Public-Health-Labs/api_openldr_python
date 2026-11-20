@@ -4,6 +4,7 @@ HIV VL patient searches (Admin only).
 Every search takes the same optional drill-down filters as the dashboard
 cards. They are all bound parameters; never build SQL from request text.
 """
+import logging
 from math import ceil
 
 from sqlalchemy import or_
@@ -26,6 +27,8 @@ from utilities.auth_helpers import (
 )
 from utilities.service_helpers import InvalidParameter
 from utilities.utils import process_patients
+
+logger = logging.getLogger(__name__)
 
 MAX_PER_PAGE = 500
 
@@ -196,8 +199,10 @@ def _search(req_args, params, date_column, filters):
             "total_pages": total_pages,
             "data": process_patients(rows, params.dates, params.facility_type, None, "vl", None, None),
         }
-    except Exception as e:
-        return {"status": "error", "code": 500, "message": "An error occurred", "error": str(e)}
+    except Exception as exc:
+        # Database errors may contain SQL, bound filters and patient details.
+        logger.error("VL patient search failed: %s", type(exc).__name__)
+        return {"status": "error", "code": 500, "message": "An error occurred"}
 
 
 # ---------------------------------------------------------------------------

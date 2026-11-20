@@ -13,7 +13,7 @@ Central analytics API for the OpenLDR platform. Provides RESTful endpoints for l
 - **Framework**: Flask 3.1.0 + Flask-RESTful 0.3.10
 - **ORM**: SQLAlchemy 2.0.40 + Flask-SQLAlchemy 3.1.1
 - **Auth**: Flask-JWT-Extended 4.7.1 (JWT tokens, 60min expiry)
-- **Database**: SQL Server via pyodbc (ODBC Driver 17)
+- **Database**: SQL Server via pyodbc (ODBC Driver 18)
 - **Docs**: Flasgger 0.9.7.1 (Swagger/OpenAPI)
 - **Production**: Waitress 3.0.2 WSGI server
 - **Data Processing**: Pandas 2.2.3
@@ -128,7 +128,12 @@ All reporting endpoints accept these standard parameters:
 
 ## Database Binds
 
-Configured in `configs/paths.py`. Each bind connects to a separate SQL Server database:
+Configured in `configs/paths.py`. Environment variables override literal INI
+values on Windows and Linux. Obtain active binds through
+`get_sqlalchemy_binds("cdr")` (or `local` / `cloud`); only the selected binds are
+validated. Errors must identify missing configuration names without values.
+Historical `SQLALCHEMY_BINDS_*` dictionaries expose only fully configured binds.
+Each bind connects to a separate SQL Server database:
 
 | Bind Key | Purpose |
 |----------|---------|
@@ -337,7 +342,31 @@ Key query builder helpers used across all modules:
   returns a token. `CLERK_WEBHOOK_SECRET_KEY` (`[Clerk] clerk_webhook_secret` on
   Windows) must equal the signing secret (`whsec_...`) of the Clerk webhook
   endpoint, otherwise the webhook rejects everything with 401.
-- Role-based access: Admin and User roles (`utilities/auth_helpers.py`).
+- Role-based access: dashboard scopes in `auth/roles.py`; privileged Admin
+  service checks remain in `utilities/auth_helpers.py`.
+- Public user creation (`POST /auth/create`) checks the caller's persisted role
+  through `create_user_service`, requiring exactly `Admin`; never trust a role
+  claim to authorise creation. Role assignment uses `auth.roles.normalize_role`:
+  `Admin`, `global`, `vl`, `dpi`, `tb_gx`, `tb_cl`, `ad` and unassigned `user`.
+  Clerk provisioning uses the separate `provision_clerk_user_service` only after
+  Svix verification, always creating a standard `user`. Do not introduce request
+  fields or a generic flag that bypass the public service's Admin check.
+- Reporting and dictionary access checks the verified JWT `sub` against the
+  current persisted role on every request, before reading the report cache.
+  Use `run_reporting_endpoint` for reports and the authenticated resource
+  decorator for dictionaries; a path-policy helper alone is not an HTTP gate.
+  Do not elevate legacy stored roles through normalisation at request time.
+  Preserve Admin restrictions on patients and privileged facility drill-downs.
+- `/usage/*` and `/admin/audit` skip the stored-role path policy (they belong to no
+  dashboard): their controllers check the event's dashboard or the Clerk `admin` claim.
+  The patient rule still applies. Service accounts (`tools/create_service_account.py`,
+  `svc-NAME`, listed in `API_SERVICE_ACCOUNTS`) are stored with role `global`: read-only
+  reports, never patients or usage reports.
+- Clerk-claim permissions (`utilities/permissions.py`) are checked after the stored role,
+  only with `PERMISSIONS_ENFORCED=1`.
+- Clerk profile sync must preserve the local role/password. Administrative role
+  updates may omit both password fields to retain the existing hash. See the
+  [role access matrix](docs/access-control.md) for routes and rollout requirements.
 
 ## Running Locally
 
@@ -401,7 +430,9 @@ Tests run with `python -m pytest -q` (no database needed). No linter configurati
 
 ## Environment Variables
 
-All required variables must be set before running:
+Set required values in the process environment or `configs/configs.ini` before
+running. Environment variables take precedence on both platforms, including
+explicit empty values. INI interpolation is disabled so passwords retain `%`.
 
 | Variable | Purpose |
 |---|---|
@@ -412,7 +443,11 @@ All required variables must be set before running:
 | `DB_VL_DATA`, `DB_DPI`, `DB_HIV_AD`, `DB_TB_DATA`, `DB_DICT`, `DB_USERS`, `DB_REPORT_DATA` | Database names |
 | `REPORT_DATA_HOST` / `REPORT_DATA_USER` / `REPORT_DATA_PASSWORD` | Optional: ReportData on another server or with its own login (blank = the environment's server and `DB_USER` / `DB_PASSWORD`) |
 
-The active environment binding is selected in `app.py` by assigning one of the three `SQLALCHEMY_BINDS_*` dicts from `configs/paths.py` to `app.config["SQLALCHEMY_BINDS"]`.
+The active environment is selected by `database_config.get_sqlalchemy_binds("cdr")`
+in `app.py`, before engine options are applied. Tools can pass a list of bind
+keys to validate only the databases they use. Do not restore eager validation
+of all environments on module import. ReportData with its own host and login
+can be selected without the main SQL settings.
 
 ## Architecture
 
@@ -428,7 +463,11 @@ The app connects to **7 SQL Server databases** simultaneously using SQLAlchemy b
 - `users` — Authentication & user logs
 - `reportData` — Weekly VL lab reports (ReportData.Resume)
 
-Connection strings use `mssql+pyodbc` with ODBC Driver 17 for SQL Server.
+Connection strings use `mssql+pyodbc` with ODBC Driver 18 for SQL Server.
+Escape ODBC delimiters and surrounding spaces without changing credential
+contents. Configure ODBC pooling through `pyodbc.pooling`, before connections;
+SQLAlchemy pooling is independent. The historical `SQL_QUERY_TIMEOUT` controls
+connection/login timeout through `connect_args`, not statement execution.
 
 ### Code Organization Pattern
 
@@ -486,16 +525,23 @@ Helper `PROCESS_COMMON_PARAMS_FACILITY()` and `PROCESS_COMMON_PARAMS_LABORATORY(
 
 ## Switching Environments
 
-In `app.py`, change the active bind dict:
+In `app.py`, change the environment passed to the validated getter, keeping
+the existing `_binds_with_engine_options` wrapper:
 ```python
 # CDR (current production)
-app.config["SQLALCHEMY_BINDS"] = SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ
+database_config.get_sqlalchemy_binds("cdr")
 
 # Local development
-# app.config["SQLALCHEMY_BINDS"] = SQLALCHEMY_BINDS_APHL_OPENLDR_ORG_MZ
+# database_config.get_sqlalchemy_binds("local")
 
 # Cloud
-# app.config["SQLALCHEMY_BINDS"] = SQLALCHEMY_BINDS_CLOUD_QUEUE_OPENLDR_ORG_MZ
+# database_config.get_sqlalchemy_binds("cloud")
 ```
 
-Alternatively, swap the import between `configs/paths.py` (production) and `configs/paths_local.py` (local dev).
+Use the same configuration loader for every environment. See
+[priority improvement stages](docs/priority-improvements.md) for the branch
+sequence and validation record. Keep unrelated stages out of the active branch.
+From stage 2 onward, create each fix branch from `izi` and merge tested changes
+only into `izi`. The user personally integrates and validates in `dev` before
+the next stage. Preserve unrelated uncommitted work; do not include it in fix
+commits or rewrite the team's history.

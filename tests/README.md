@@ -42,6 +42,43 @@ pip install pytest
 
 ## Running the suite
 
+SQL configuration and production route registration regressions run without
+SQL Server or real credentials:
+
+```powershell
+python -m pytest tests/test_database_config.py tests/tb/test_tb_cultura_api_module.py -q
+```
+
+These cover environment/INI precedence on Windows and Linux, literal and escaped
+credentials, validation of selected binds, independent ReportData settings,
+pooling and safe connection diagnostics. The complete suite must pass before
+integrating a priority improvement into `izi`; the user then integrates and
+validates it in `dev`. See the
+[stage record](../docs/priority-improvements.md).
+
+User-creation authorisation and signed Clerk provisioning regressions:
+
+```powershell
+python -m pytest tests/test_user_creation.py tests/test_clerk_webhook.py tests/test_auth_enforcement.py -q
+```
+
+These verify stored Admin permissions, rejected privilege claims, supported
+creation roles, real HTTP errors and standard-role provisioning after Svix
+verification. They use isolated SQLite data and mocked Clerk fetches.
+
+Dashboard role isolation and assignment are covered by:
+
+```powershell
+python -m pytest tests/test_roles.py tests/test_dashboard_roles.py tests/test_dashboard_role_admin.py -q
+```
+
+The HTTP tests use real persisted SQLite accounts and verified test JWTs; only
+report queries and outbound Clerk/SMTP operations are replaced. They check all
+subdivisions, every dictionary route, role revocation before cached responses,
+Admin-only management and Clerk sync preserving local permissions. Existing
+endpoint fixtures now create an authorised local test account instead of
+assuming a token's role claim grants access.
+
 ```powershell
 # everything
 .\env\Scripts\python.exe -m pytest -q

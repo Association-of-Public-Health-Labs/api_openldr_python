@@ -7,6 +7,12 @@ from db.database import db
 from usage.models import PatientAccessLog
 from usage.service import is_patient_request
 
+@pytest.fixture(autouse=True)
+def clerk_subject_exists(persisted_user):
+    """authenticate_request looks the token's subject up in the users table; the Clerk test token's is user_abc."""
+    persisted_user(role="Admin", user_id="user_abc")
+
+
 VL_BY_NAME = "hiv.vl.controllers.vl_controller_patients.get_patients_by_name_service"
 VL_SUMMARY = "hiv.vl.controllers.vl_controller_summary.samples_history_service_by_month"
 URL = "/hiv/vl/patients/by_name/"

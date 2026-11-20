@@ -1,4 +1,5 @@
 """Permission gate: claim parsing, path mapping, and the check in authenticate_request."""
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -78,6 +79,12 @@ def clerk_config(monkeypatch):
     monkeypatch.setattr(tv, "_clerk_jwks", tv.JwksCache(make_jwks))
 
 
+@pytest.fixture(autouse=True)
+def clerk_subject_exists(persisted_user):
+    """authenticate_request looks the token's subject up in the users table; the Clerk test token's is user_abc."""
+    persisted_user(role="Admin", user_id="user_abc")
+
+
 @pytest.fixture
 def enforced(app, monkeypatch):
     monkeypatch.setitem(app.config, "PERMISSIONS_ENFORCED", True)
@@ -127,7 +134,8 @@ def test_flag_on_no_claim_on_dict_endpoint_passes(clerk_config):
         user_id, err = controller_helpers.authenticate_request()
         return err if err is not None else {"user": user_id, "dashboards": sorted(current_permissions().dashboards)}
 
-    response = probe.test_client().get("/dict/x/", headers=bearer())
+    with patch.object(controller_helpers, "get_user_by_id_service", return_value=SimpleNamespace(role="vl")):
+        response = probe.test_client().get("/dict/x/", headers=bearer())
     assert response.status_code == 200
     assert response.get_json() == {"user": "user_abc", "dashboards": []}
 

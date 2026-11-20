@@ -3,14 +3,15 @@ import logging
 import bcrypt
 from flask_jwt_extended import create_access_token
 from auth.user_model import User, UserLogs
+from auth.roles import CANONICAL_ROLES, normalize_role
 from uuid import uuid4
 from datetime import datetime, timedelta
 from db.database import db
 from flask import request, session
 from utilities.permissions import permissions_enforced, service_account_names
 from configs.paths import *
-# from configs.paths_local import *
 
+# from configs.paths_local import *
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ _INVALID_CREDENTIALS = {"status": 401, "error": "Unauthorized", "message": "Inva
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
 
 def _error_response(status: int, error: str, message: str) -> dict:
     """Create a standardized error response."""
@@ -68,13 +70,6 @@ def _build_user_data(user) -> dict:
     }
 
 
-def _generic_server_error() -> dict:
-    """Service-account login failure body: no exception text."""
-    from utilities.controller_helpers import GENERIC_SERVER_ERROR
-
-    return {"status": 500, "error": "Internal Server Error", "message": GENERIC_SERVER_ERROR}
-
-
 def _caller_context() -> dict:
     """IP (X-Forwarded-For, else the socket peer) and user agent of the request being served."""
     try:
@@ -114,100 +109,131 @@ def _service_login_user(login_username):
 
 
 def login_user_service(args):
+    """
+    Authenticate one unambiguous account using its bcrypt password hash.
 
-    login_username = args.get("username")
-    login_email = args.get("email")
+    A listed service account (or any login once PERMISSIONS_ENFORCED is on) follows the
+    service-account rules: only rows ``svc-NAME`` of names in API_SERVICE_ACCOUNTS, and the
+    same answer and bcrypt time for an unlisted name, a missing row and a wrong secret.
+    """
+    raw_username = args.get("username")
+    raw_email = args.get("email")
     login_password = args.get("password")
+    if any(
+        value is not None and not isinstance(value, str)
+        for value in (raw_username, raw_email)
+    ):
+        return _error_response(400, "Bad Request", "Username/email must be strings")
+    login_username = raw_username.strip() if raw_username else None
+    login_email = raw_email.strip() if raw_email else None
+    if (
+        not (login_username or login_email)
+        or not isinstance(login_password, str)
+        or not login_password
+    ):
+        return _error_response(
+            400, "Bad Request", "Username/email and password are required"
+        )
+    try:
+        password_bytes = login_password.encode("utf-8")
+    except UnicodeEncodeError:
+        return _error_response(400, "Bad Request", "Invalid password format")
+    # bcrypt only distinguishes the first 72 bytes. Do not accept longer input
+    # as another password sharing the same prefix.
+    if len(password_bytes) > 72:
+        return _error_response(
+            400, "Bad Request", "Password exceeds bcrypt's 72-byte limit"
+        )
 
-    if uses_service_login(login_username):
-        # Same answer for an unlisted name, a missing row and a wrong secret.
-        user_query = _service_login_user(login_username) if isinstance(login_username, str) else None
-        if not _secret_matches(login_password, user_query.password if user_query else None):
-            return dict(_INVALID_CREDENTIALS)
-        rejected = False
-    else:
-        if login_username:
-            user_query = User.query.filter_by(user_name=login_username, user_id=login_password).first()
+    service_login = uses_service_login(login_username)
+    invalid = dict(_INVALID_CREDENTIALS)
+    try:
+        if service_login:
+            candidate = _service_login_user(login_username) if login_username else None
+            if candidate is not None and getattr(candidate, "is_active", True) is False:
+                candidate = None
+            if not _secret_matches(login_password, candidate.password if candidate else None):
+                return invalid
+            user = candidate
         else:
-            user_query = User.query.filter_by(email=login_email, user_id=login_password).first()
-        rejected = not user_query or not bcrypt.checkpw(
-            login_password.encode("utf-8"), user_query.password.encode("utf-8")
+            identifiers = {}
+            if login_username:
+                identifiers["user_name"] = login_username
+            if login_email:
+                identifiers["email"] = login_email
+            # When both identifiers are supplied they must identify the same row.
+            # Duplicates must never select an arbitrary account through .first().
+            matches = (
+                User.query.populate_existing()
+                .filter_by(is_active=True, **identifiers)
+                .limit(2)
+                .all()
+            )
+            if len(matches) != 1:
+                return invalid
+            user = matches[0]
+            if login_password == user.user_id:
+                return invalid
+            try:
+                password_matches = bcrypt.checkpw(
+                    password_bytes, user.password.encode("utf-8")
+                )
+            except (ValueError, TypeError, AttributeError):
+                return invalid
+            if not password_matches:
+                return invalid
+
+        user_data = {
+            "user_id": user.user_id,
+            "user_name": user.user_name,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email_address": user.email,
+            "role": get_user_role(user),
+        }
+        # Create the token before persisting a successful-login marker. The
+        # login timestamp and audit entry are committed together.
+        access_token = create_access_token(
+            identity=user.user_id,
+            additional_claims=user_data,
+            expires_delta=timedelta(hours=1),
         )
-
-    if rejected:
-        return (
-            {
-                "status": 401,
-                "error": "Unauthorized",
-                "message": "Invalid credentials",
-            },
-        )
-    else:
-        user_query.last_login = datetime.now()
-
-        # Store values before commit
-        user_id = user_query.user_id
-        user_name = user_query.user_name
-        user_first_name = user_query.first_name
-        user_last_name = user_query.last_name
-        user_email = user_query.email
-        role = get_user_role(user_query)
-
-        db.session.commit()
-
-        try:
-            save_user_log_service(
-                {
-                    "user_id": user_id,
-                    "log_type": "login",
-                    "log_details": {
+        user.last_login = datetime.now()
+        db.session.add(
+            UserLogs(
+                user_id=user.user_id,
+                log_id=str(uuid4()),
+                log_date=datetime.now(),
+                log_type="login",
+                log_details=json.dumps(
+                    {
                         "event": "login",
                         "source": "auth_service.login_user_service",
                         "user": {
-                            "user_id": user_id,
-                            "user_name": user_name,
-                            "first_name": user_first_name,
-                            "last_name": user_last_name,
-                            "role": role,
-                            "email": user_email,
+                            "user_id": user.user_id,
+                            "user_name": user.user_name,
+                            "first_name": user.first_name,
+                            "last_name": user.last_name,
+                            "role": user.role,
+                            "email": user.email,
                         },
                         "message": "Login successful",
                         "context": _caller_context(),
-                    },
-                }
+                    }
+                ),
             )
-            access_token = create_access_token(
-                identity= user_id,
-                additional_claims={
-                    "user_name": user_name,
-                    "first_name": user_first_name,
-                    "last_name": user_last_name,
-                    "role": role,
-                    "user_id": user_id,
-                    "email_address": user_email,
-                },
-                expires_delta=timedelta(hours=1),
-            )
-        except Exception as e:
-            db.session.rollback()
-            if uses_service_login(login_username):
-                logger.exception("Could not issue a token for %s", user_id)
-                return _generic_server_error()
-            return {"status": 500, "error": "Internal Server Error", "message": str(e)}
-
+        )
+        db.session.commit()
         return {
             "message": "Login successful",
-            "data": {
-                "user_id": user_id,
-                "user_name": user_name,
-                "first_name": user_first_name,
-                "last_name": user_last_name,
-                "email_address": user_email,
-                "role": role,
-            },
+            "data": user_data,
             "token": access_token,
             "status": 200,
         }
+    except Exception as exc:
+        db.session.rollback()
+        logger.error("Local login failed (%s)", type(exc).__name__)
+        return _error_response(500, "Internal Server Error", "An error occurred")
 
 
 def logout_user_service(args):
@@ -250,17 +276,31 @@ def update_user_service(args, id):
 
     # Validate required fields
     required_fields = [
-        update_username, update_first_name, update_last_name,
-        update_password, update_confirm_password, update_email,
-        update_role, update_user_id
+        update_username,
+        update_first_name,
+        update_last_name,
+        update_email,
+        update_role,
+        update_user_id,
     ]
     if not all(required_fields):
         return _error_response(400, "Bad Request", "Invalid input")
 
-    if update_password != update_confirm_password:
+    update_role = normalize_role(update_role)
+    if update_role is None:
+        return _error_response(
+            400, "Bad Request", "Role must be one of: " + ", ".join(CANONICAL_ROLES)
+        )
+
+    change_password = update_password is not None or update_confirm_password is not None
+    if change_password and (
+        not update_password
+        or not update_confirm_password
+        or update_password != update_confirm_password
+    ):
         return _error_response(400, "Bad Request", "Passwords do not match")
 
-    user_query = User.query.filter_by(user_id=update_user_id).first()
+    user_query = get_user_by_id_service(update_user_id)
     if not user_query:
         return _error_response(404, "Not Found", "User not found")
 
@@ -277,7 +317,8 @@ def update_user_service(args, id):
     user_query.user_name = update_username
     user_query.first_name = update_first_name
     user_query.last_name = update_last_name
-    user_query.password = _hash_password(update_password)
+    if change_password:
+        user_query.password = _hash_password(update_password)
     user_query.email = update_email
     user_query.role = update_role
     user_query.updated_at = datetime.now()
@@ -303,9 +344,8 @@ def update_user_service(args, id):
 
 def delete_user_service(id, current_user=None):
     """
-    Delete a user by ID.
-    Note: Logging is handled by the controller (Clerk webhook).
-    
+    Deactivate a user while preserving their row and audit references.
+
     Args:
         id: User ID to delete
         current_user: Optional - authenticated user ID for permission check.
@@ -320,19 +360,51 @@ def delete_user_service(id, current_user=None):
         if error:
             return error
 
-    user_query = User.query.filter_by(user_id=id).first()
-    if not user_query:
-        return _error_response(404, "Not Found", "User not found")
-
-    # Store values before deletion for response
-    deleted_data = _build_user_data(user_query)
-
     try:
-        db.session.delete(user_query)
+        # Include tombstones so retries retain the existing success contract.
+        user_query = get_user_by_id_service(id, include_inactive=True)
+        if not user_query:
+            return _error_response(404, "Not Found", "User not found")
+        deleted_data = _build_user_data(user_query)
+        changed_at = datetime.now()
+        changed = (
+            User.query.filter_by(user_id=id, is_active=True)
+            .update(
+                {User.is_active: False, User.updated_at: changed_at},
+                synchronize_session=False,
+            )
+        )
+        if changed not in (0, 1):
+            raise RuntimeError("Unable to confirm account deactivation count")
+        if changed == 1:
+            # The conditional UPDATE and this audit entry share one transaction.
+            # A repeat does not update either the timestamp or the audit log.
+            db.session.add(
+                UserLogs(
+                    user_id=id,
+                    log_id=str(uuid4()),
+                    log_date=changed_at,
+                    log_type="user_deactivated",
+                    log_details=json.dumps(
+                        {
+                            "event": "user_deactivated",
+                            "actor_id": current_user if current_user is not None else "clerk",
+                            "target_user_id": id,
+                            "deactivated_at": changed_at.isoformat(),
+                            "source": "api" if current_user is not None else "clerk",
+                        }
+                    ),
+                )
+            )
+        # This project keeps instances after commit. Invalidate only the two
+        # bulk-updated fields so later reads see the persisted state, including
+        # a concurrent deactivation's original timestamp when no row changed.
+        db.session.expire(user_query, ["is_active", "updated_at"])
         db.session.commit()
-    except Exception as e:
+    except Exception as exc:
         db.session.rollback()
-        return _error_response(500, "Internal Server Error", str(e))
+        logger.error("User deactivation persistence failed (%s)", type(exc).__name__)
+        return _error_response(500, "Internal Server Error", "An error occurred")
 
     return {
         "message": "User deleted successfully",
@@ -348,13 +420,61 @@ def delete_user_service(id, current_user=None):
 
 
 def create_user_service(args, id):
+    """Create an account only on behalf of an existing, persisted Admin."""
+    if not id:
+        return _error_response(403, "Forbidden", "Admin permission required")
+    _, error = _check_admin_permission(id)
+    if error:
+        return _error_response(403, "Forbidden", "Admin permission required")
+    return _create_user_record(args)
+
+
+def provision_clerk_user_service(args):
+    """Provision a standard user after the caller verifies the Svix signature.
+
+    This is an internal webhook path, never a bypass selected by public JSON.
+    Clerk data or metadata cannot assign an administrative role here.
     """
-    Create a new user.
-    Note: Logging is handled by the controller (Clerk webhook).
-    
-    Args:
-        args: User data dictionary
-        id: ID of the user performing the action (for audit)
+    if not args.get("user_id"):
+        return _error_response(400, "Bad Request", "User ID is required")
+    return _create_user_record({**args, "role": "user"})
+
+
+def sync_clerk_user_service(args):
+    """Sync a verified Clerk profile without overwriting local permissions.
+
+    Called only by the signed webhook. Role and password are administered
+    separately and must survive Clerk profile updates unchanged.
+    """
+    if not args.get("user_id"):
+        return _error_response(400, "Bad Request", "User ID is required")
+    fields = {
+        "user_name": args.get("username"),
+        "first_name": args.get("first_name"),
+        "last_name": args.get("last_name"),
+        "email": args.get("email"),
+    }
+    if not all(fields.values()):
+        return _error_response(400, "Bad Request", "Profile fields are required")
+    user = get_user_by_id_service(args["user_id"])
+    if user is None:
+        return _error_response(404, "Not Found", "User not found")
+    for name, value in fields.items():
+        setattr(user, name, value)
+    user.updated_at = datetime.now()
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        logger.error("Clerk profile persistence failed (%s)", type(exc).__name__)
+        return _error_response(500, "Internal Server Error", "An error occurred")
+    return {"message": "User updated successfully", "data": _build_user_data(user)}
+
+
+def _create_user_record(args):
+    """
+    Persist a user after public authorisation or verified webhook provisioning.
+    Logging of successful Clerk creation is handled by the webhook controller.
     """
     create_username = args.get("username")
     create_first_name = args.get("first_name")
@@ -366,23 +486,40 @@ def create_user_service(args, id):
 
     # Validate required fields
     required_fields = [
-        create_username, create_first_name, create_last_name,
-        create_password, create_confirm_password, create_email, create_role
+        create_username,
+        create_first_name,
+        create_last_name,
+        create_password,
+        create_confirm_password,
+        create_email,
+        create_role,
     ]
     if not all(required_fields):
         return _error_response(400, "Bad Request", "All fields are required")
 
+    create_role = normalize_role(create_role)
+    if create_role is None:
+        return _error_response(
+            400, "Bad Request", "Role must be one of: " + ", ".join(CANONICAL_ROLES)
+        )
+
     if create_password != create_confirm_password:
         return _error_response(400, "Bad Request", "Passwords do not match")
+
+    new_user_id = args.get("user_id") or str(uuid4())
+    # A deactivated Clerk identity remains reserved. Neither provisioning nor
+    # account creation can overwrite it or turn a deletion into reactivation.
+    if get_user_by_id_service(new_user_id, include_inactive=True) is not None:
+        return _error_response(409, "Conflict", "User already exists")
 
     # Check for existing user with same username/email
     existing_users = User.query.filter_by(user_name=create_username).all()
     for user in existing_users:
         if user.user_name == create_username or user.email == create_email:
             if _verify_password(create_password, user.password):
-                return _error_response(400, "Bad Request", "Username or email already exists")
-
-    new_user_id = args.get("user_id") or str(uuid4())
+                return _error_response(
+                    400, "Bad Request", "Username or email already exists"
+                )
 
     user = User(
         user_name=create_username,
@@ -394,6 +531,7 @@ def create_user_service(args, id):
         user_id=new_user_id,
         start_date=datetime.now(),
         updated_at=datetime.now(),
+        is_active=True,
     )
 
     try:
@@ -401,7 +539,8 @@ def create_user_service(args, id):
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        return _error_response(500, "Internal Server Error", str(e))
+        logger.error("User creation persistence failed (%s)", type(e).__name__)
+        return _error_response(500, "Internal Server Error", "An error occurred")
 
     return {
         "message": "User created successfully",
@@ -433,7 +572,7 @@ def get_all_users_service(id):
             "message": f"Forbidden - User with id {user.user_id} and role {user.role} is not authorized to access this resource.",
         }
 
-    users = User.query.all()
+    users = User.query.populate_existing().filter_by(is_active=True).all()
 
     try:
         save_user_log_service(
@@ -448,7 +587,10 @@ def get_all_users_service(id):
                         "role": user.role,
                     },
                     "message": "Fetched all users",
-                    "context": {"count": len(users), "user_ids": [u.user_id for u in users]},
+                    "context": {
+                        "count": len(users),
+                        "user_ids": [u.user_id for u in users],
+                    },
                 },
             }
         )
@@ -466,17 +608,23 @@ def get_all_users_service(id):
     ]
 
 
-def get_user_by_id_service(id):
+def get_user_by_id_service(id, *, include_inactive=False):
     """
-    Get a user by their id.
+    Get an active account by its persisted user ID.
 
     Args:
-        id (int): The id of the user.
+        id (str): The account's user_id primary key.
+        include_inactive (bool): Internal history/tombstone lookup only.
 
     Returns:
         User: The user object if found, None otherwise.
     """
-    user = User.query.filter(User.user_id == id).order_by(User.start_date.desc()).first()
+    # Re-read the database even when this identity is already in the session.
+    # Authorization cannot rely on a stale cached instance after deactivation.
+    query = User.query.populate_existing().filter(User.user_id == id)
+    if not include_inactive:
+        query = query.filter_by(is_active=True)
+    user = query.first()
 
     return user
 
@@ -504,10 +652,10 @@ def update_last_login_service(user_id: str):
     Note: Logging is handled by the controller (Clerk webhook).
     """
     try:
-        user = User.query.filter_by(user_id=user_id).first()
+        user = get_user_by_id_service(user_id)
         if not user:
             return _error_response(404, "Not Found", "User not found")
-        
+
         user.last_login = datetime.now()
         db.session.commit()
         return {"status": 200, "message": "last_login updated"}

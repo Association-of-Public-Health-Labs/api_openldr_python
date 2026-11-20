@@ -5,7 +5,7 @@ Create an API service account: the login a dashboard server uses to read report 
 
 NAME is lowercase letters, digits and hyphens, starting with a letter (e.g. ``tb-dashboard``). The
 script stores a bcrypt hash of a new random secret in ``openldr_api_user_users`` (user_id
-``svc-NAME``, role ``service``) and prints the secret once; it is not kept anywhere else. It writes
+``svc-NAME``, role ``global``) and prints the secret once; it is not kept anywhere else. It writes
 to the database the API is configured for, so run it where you mean to.
 
 For the account to log in, add NAME to ``API_SERVICE_ACCOUNTS`` (comma separated) in the API's
@@ -44,7 +44,7 @@ def build_service_account(name):
         password=bcrypt.hashpw(secret.encode("utf-8"), bcrypt.gensalt()).decode("utf-8"),
         start_date=now,
         updated_at=now,
-        role="service",
+        role="global",  # read-only reports in auth/roles.py; never patients (not Admin)
         email=None,
     )
     return secret, row

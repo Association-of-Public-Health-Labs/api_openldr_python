@@ -52,14 +52,14 @@ def users(app):
         return User(
             user_id=user_id, user_name=name, first_name="F", last_name="L",
             password=bcrypt.hashpw(password.encode(), bcrypt.gensalt(4)).decode(),
-            start_date=datetime.now(), updated_at=datetime.now(), role="service", email=None,
+            start_date=datetime.now(), updated_at=datetime.now(), role="global", email=None,
         )
     with app.app_context():
         User.query.delete()
         UserLogs.query.delete()
         db.session.add_all([
             row("svc-dash", "svc-svc-dash", SECRET),
-            row("alice", "alice-id", "alice-id"),  # personal account: user_id == password
+            row("alice", "alice-id", "alice-secret"),  # personal account
         ])
         db.session.commit()
     yield
@@ -138,7 +138,7 @@ def test_service_account_cannot_call_usage_reports(client, enforced):
 
 
 def test_unlisted_personal_account_login_is_401_with_the_same_body(client, enforced):
-    unlisted = login(client, "alice", "alice-id")
+    unlisted = login(client, "alice", "alice-secret")
     wrong_secret = login(client, "svc-dash", "nope")
     missing_row = login(client, "svc-other", SECRET)  # listed, but no row
     for response in (unlisted, wrong_secret, missing_row):
@@ -160,10 +160,12 @@ def test_personal_row_with_a_listed_name_is_not_a_service_login(client, app, enf
     assert response.get_json() == BAD_LOGIN
 
 
-def test_overlong_password_is_a_plain_401(client, enforced):
-    response = login(client, "svc-dash", "x" * 200)
-    assert response.status_code == 401
-    assert response.get_json() == BAD_LOGIN
+def test_overlong_password_is_a_400_for_any_name(client, enforced):
+    # Rejected before any lookup, so the answer says nothing about the account.
+    for name in ("svc-dash", "nobody"):
+        response = login(client, name, "x" * 200)
+        assert response.status_code == 400
+        assert response.get_json()["message"] == "Password exceeds bcrypt's 72-byte limit"
 
 
 def test_old_personal_hs256_token_is_401_on_a_report(client, app, enforced):
@@ -212,7 +214,7 @@ def test_flag_off_user_management_routes_need_a_token_as_before(client, not_enfo
 
 
 def test_flag_off_personal_login_and_old_token_work_as_before(client, app, not_enforced):
-    response = login(client, "alice", "alice-id")
+    response = login(client, "alice", "alice-secret")
     assert response.status_code == 200
     assert response.get_json()["status"] == 200
     headers = {"Authorization": f"Bearer {response.get_json()['token']}"}
@@ -220,10 +222,10 @@ def test_flag_off_personal_login_and_old_token_work_as_before(client, app, not_e
         assert client.get(VL_URL, headers=headers).status_code == 200
 
 
-def test_flag_off_bad_login_body_is_unchanged(client, not_enforced):
+def test_flag_off_bad_login_is_a_401(client, not_enforced):
     response = login(client, "alice", "wrong")
-    assert response.status_code == 200
-    assert response.get_json() == [BAD_LOGIN]
+    assert response.status_code == 401
+    assert response.get_json() == BAD_LOGIN
 
 
 def login_log_context(app, user_id):
@@ -234,12 +236,12 @@ def login_log_context(app, user_id):
 
 
 def test_flag_off_login_records_ip_and_user_agent(client, app, not_enforced):
-    login(client, "alice", "alice-id", headers={"X-Forwarded-For": "203.0.113.9", "User-Agent": "probe/1"})
+    login(client, "alice", "alice-secret", headers={"X-Forwarded-For": "203.0.113.9", "User-Agent": "probe/1"})
     assert login_log_context(app, "alice-id") == {"ip": "203.0.113.9", "user_agent": "probe/1"}
 
 
 def test_login_log_falls_back_to_remote_addr(client, app, not_enforced):
-    login(client, "alice", "alice-id", headers={"User-Agent": "probe/2"})
+    login(client, "alice", "alice-secret", headers={"User-Agent": "probe/2"})
     context = login_log_context(app, "alice-id")
     assert context["ip"] == "127.0.0.1" and context["user_agent"] == "probe/2"
 
@@ -255,7 +257,7 @@ def test_flag_on_lookup_error_is_a_generic_500(client, enforced):
         response = login(client, "svc-dash", SECRET)
     assert response.status_code == 500
     assert "DRIVERDETAIL" not in response.get_data(as_text=True)
-    assert response.get_json() == {"status": "error", "code": 500, "message": "An error occurred"}
+    assert response.get_json() == {"status": 500, "error": "Internal Server Error", "message": "An error occurred"}
 
 
 def test_flag_on_token_error_is_a_generic_500(client, enforced):
@@ -288,8 +290,8 @@ def test_flag_off_listed_account_token_gets_numbers_but_not_patients_or_usage(cl
 
 
 def test_flag_off_unlisted_name_follows_the_old_path(client, not_enforced):
-    assert login(client, "alice", "alice-id").get_json()["status"] == 200
-    assert login(client, "alice", "wrong").get_json() == [BAD_LOGIN]
+    assert login(client, "alice", "alice-secret").get_json()["status"] == 200
+    assert login(client, "alice", "wrong").get_json() == BAD_LOGIN
 
 
 # --- tools/create_service_account.py ------------------------------------------------
@@ -297,7 +299,7 @@ def test_flag_off_unlisted_name_follows_the_old_path(client, not_enforced):
 def test_create_service_account_builds_the_row():
     from tools.create_service_account import build_service_account
     secret, row = build_service_account("tb-dashboard")
-    assert (row.user_id, row.user_name, row.role) == ("svc-tb-dashboard", "tb-dashboard", "service")
+    assert (row.user_id, row.user_name, row.role) == ("svc-tb-dashboard", "tb-dashboard", "global")
     assert len(secret) >= 64 and secret not in row.password
     assert bcrypt.checkpw(secret.encode(), row.password.encode())
     assert build_service_account("tb-dashboard")[0] != secret
