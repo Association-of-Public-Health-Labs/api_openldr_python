@@ -380,7 +380,7 @@ def test_new_clerk_account_has_no_public_identifier_password(client, app, login_
     assert "token" not in response.get_data(as_text=True).lower()
     with app.app_context():
         user = User.query.filter_by(user_id=user_id).one()
-        assert user.role == "user"
+        assert user.role == "global"
         assert not bcrypt.checkpw(user_id.encode(), user.password.encode())
         username = user.user_name
     assert_invalid_credentials(client.post("/auth/login", json={

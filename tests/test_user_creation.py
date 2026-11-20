@@ -289,14 +289,15 @@ def test_http_creation_commit_error_rolls_back_without_details(client, user_args
     assert_no_created_user(actor_count=1)
 
 
-def test_clerk_provisioning_forces_basic_role_without_admin(user_args):
-    user_args.update({"user_id": "user_clerk_new", "provider": "clerk", "role": "Admin"})
+@pytest.mark.parametrize("requested", ["Admin", "user", "vl", None])
+def test_clerk_provisioning_always_creates_global(user_args, requested):
+    user_args.update({"user_id": "user_clerk_new", "provider": "clerk", "role": requested})
 
     result = auth_service.provision_clerk_user_service(user_args)
 
     assert result["message"] == "User created successfully"
-    assert result["data"]["role"] == "user"
-    assert User.query.one().role == "user"
+    assert result["data"]["role"] == "global"
+    assert User.query.one().role == "global"
     assert User.query.one().user_id == "user_clerk_new"
     assert not _contains_token(result)
 
@@ -317,7 +318,7 @@ def test_signed_clerk_event_provisions_without_admin_or_token(client, monkeypatc
     assert response.get_json()["message"] == "User created successfully"
     assert not _contains_token(response.get_json())
     assert User.query.one().user_id == "user_abc"
-    assert User.query.one().role == "user"
+    assert User.query.one().role == "global"
     create.assert_not_called()
 
 

@@ -15,6 +15,9 @@ from configs.paths import *
 
 logger = logging.getLogger(__name__)
 
+# Stored role of every new Clerk account: all three dashboards, no patient data.
+CLERK_SIGNUP_ROLE = "global"
+
 # Checked when a login names no usable account, so a miss costs the same bcrypt time as a wrong secret.
 _DUMMY_HASH = None
 
@@ -430,14 +433,15 @@ def create_user_service(args, id):
 
 
 def provision_clerk_user_service(args):
-    """Provision a standard user after the caller verifies the Svix signature.
+    """Provision a new Clerk user as ``global`` after the caller verifies the Svix signature.
 
-    This is an internal webhook path, never a bypass selected by public JSON.
-    Clerk data or metadata cannot assign an administrative role here.
+    ``global`` reads the VL, EID and TB dashboards and never patient data (owner decision,
+    2026-11-20: every user gets the three dashboards). This is an internal webhook path, never
+    a bypass selected by public JSON. Clerk data or metadata cannot assign another role here.
     """
     if not args.get("user_id"):
         return _error_response(400, "Bad Request", "User ID is required")
-    return _create_user_record({**args, "role": "user"})
+    return _create_user_record({**args, "role": CLERK_SIGNUP_ROLE})
 
 
 def sync_clerk_user_service(args):
