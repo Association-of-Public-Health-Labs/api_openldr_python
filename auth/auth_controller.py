@@ -124,7 +124,7 @@ def _fetch_clerk_user(user_id: str):
 
 
 def _build_user_args_from_clerk(
-    user_id: str, clerk_data: dict, role: str = "user"
+    user_id: str, clerk_data: dict, role: str = "global"
 ) -> dict:
     """Build user arguments dictionary from Clerk API response."""
     email = clerk_data.get("email_addresses", [{}])[0].get("email_address")
@@ -605,7 +605,7 @@ class clerk_user_controller(Resource):
         )
 
     def _create_new_user_from_clerk(self, user_id: str, clerk_data: dict):
-        """Provision a standard user after the webhook signature is verified."""
+        """Provision a new user (role ``global``) after the webhook signature is verified."""
         args = _build_user_args_from_clerk(user_id, clerk_data)
         try:
             user_create = provision_clerk_user_service(args)

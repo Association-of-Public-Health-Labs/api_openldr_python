@@ -349,7 +349,8 @@ Key query builder helpers used across all modules:
   claim to authorise creation. Role assignment uses `auth.roles.normalize_role`:
   `Admin`, `global`, `vl`, `dpi`, `tb_gx`, `tb_cl`, `ad` and unassigned `user`.
   Clerk provisioning uses the separate `provision_clerk_user_service` only after
-  Svix verification, always creating a standard `user`. Do not introduce request
+  Svix verification, always creating `global` (all three dashboards, no patient data;
+  owner decision 2026-11-20). Do not introduce request
   fields or a generic flag that bypass the public service's Admin check.
 - Reporting and dictionary access checks the verified JWT `sub` against the
   current persisted role on every request, before reading the report cache.

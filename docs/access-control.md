@@ -85,8 +85,9 @@ Omitir `password` e `confirm_password` em conjunto conserva o hash existente.
 Para mudar a password, fornecer ambos com o mesmo valor não vazio. Os restantes
 campos obrigatórios do endpoint de actualização continuam a ser exigidos.
 
-Contas novas do Clerk continuam a receber `user`, sem acesso a relatórios até
-Admin atribuir uma subdivisão ou `global`. Eventos assinados `user.updated`
+Contas novas do Clerk recebem `global` (decisão de 2026-11-20): todos os
+utilizadores vêem os painéis de CV, DPI e TB, sem dados de pacientes. Admin pode
+depois restringir a uma subdivisão. Eventos assinados `user.updated`
 actualizam o perfil, preservando o papel e a password administrados localmente.
 Metadados Clerk não podem atribuir `Admin` ou mudar uma subdivisão.
 
