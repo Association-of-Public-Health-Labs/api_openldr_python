@@ -1,9 +1,18 @@
+import logging
 from math import ceil
 from tb.gxpert.models.tb_gx_model import TBMaster
 from utilities.utils import *
 from utilities.auth_helpers import require_admin
 from sqlalchemy import and_, or_, func, case, literal
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+def _internal_error(exc):
+    # Never render database errors: their text may include patient filters/rows.
+    logger.error("TB GeneXpert patient search failed: %s", type(exc).__name__)
+    return {"status": "error", "code": 500, "message": "An error occurred"}
 
 
 def paginate_query(query, page, per_page):
@@ -133,12 +142,8 @@ def get_patients_by_name_service(req_args):
 
         return response
 
-    except Exception as e:
-        return {
-            "status": "error",
-            "code": 500,
-            "message": f"An error occurred: {str(e)}",
-        }
+    except Exception as exc:
+        return _internal_error(exc)
 
 
 def get_patients_by_facility_service(req_args):
@@ -199,12 +204,8 @@ def get_patients_by_facility_service(req_args):
 
         return response
 
-    except Exception as e:
-        return {
-            "status": "error",
-            "code": 500,
-            "message": f"An error occurred: {str(e)}",
-        }
+    except Exception as exc:
+        return _internal_error(exc)
 
 
 def get_patients_by_sample_type_service(req_args):
@@ -253,8 +254,6 @@ def get_patients_by_sample_type_service(req_args):
         for part in str(s).split(",")
         if part.strip()
     ]
-
-    print("Sample Types:", sample_types)
 
     invalid = [s for s in sample_types if s not in sample_type_mapping]
 
@@ -322,8 +321,6 @@ def get_patients_by_sample_type_service(req_args):
             TBMaster.TypeOfResult,
         ).filter(*filters)
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
-
         data, total_count, total_pages = paginate_query(query, page, per_page)
 
         patients = process_patients(
@@ -341,12 +338,8 @@ def get_patients_by_sample_type_service(req_args):
 
         return response
 
-    except Exception as e:
-        return {
-            "status": "error",
-            "code": 500,
-            "message": f"An error occurred: {str(e)}",
-        }
+    except Exception as exc:
+        return _internal_error(exc)
 
 
 def get_patients_by_result_type_service(req_args):
@@ -476,9 +469,5 @@ def get_patients_by_result_type_service(req_args):
 
         return response
 
-    except Exception as e:
-        return {
-            "status": "error",
-            "code": 500,
-            "message": f"An error occurred: {str(e)}",
-        }
+    except Exception as exc:
+        return _internal_error(exc)

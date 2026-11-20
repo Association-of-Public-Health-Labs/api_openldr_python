@@ -1,4 +1,6 @@
 import logging
+import secrets
+from functools import wraps
 
 import requests
 from flask_restful import Resource, reqparse
@@ -8,6 +10,8 @@ from auth.auth_service import (
     update_user_service,
     delete_user_service,
     create_user_service,
+    provision_clerk_user_service,
+    sync_clerk_user_service,
     logout_user_service,
     get_user_by_id_service,
     save_user_log_service,
@@ -15,6 +19,7 @@ from auth.auth_service import (
 )
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import jsonify, request
+from utilities.permissions import permissions_enforced
 from configs.paths import *
 from configs import paths as config_paths
 from utilities.webhook_verification import (
@@ -24,6 +29,7 @@ from utilities.webhook_verification import (
 
 logger = logging.getLogger(__name__)
 
+
 WEBHOOK_UNAUTHORIZED_BODY = {
     "status": 401,
     "error": "Unauthorized",
@@ -31,10 +37,28 @@ WEBHOOK_UNAUTHORIZED_BODY = {
 }
 # from configs.paths_local import *
 
+# With PERMISSIONS_ENFORCED on, users are managed in the admin dashboard (Clerk), not through the API.
+RETIRED_ENDPOINTS = frozenset({"auth_users", "auth_create", "auth_update", "auth_delete"})
+GONE_BODY = {
+    "status": "error",
+    "code": 410,
+    "message": "Gone: user management is no longer available through this API",
+}
+
+
+class _RetirableResource(Resource):
+    """Answers 410 on the retired /auth routes before any auth decorator runs (flag on only)."""
+
+    def dispatch_request(self, *args, **kwargs):
+        if permissions_enforced() and request.endpoint in RETIRED_ENDPOINTS:
+            return GONE_BODY, 410
+        return super().dispatch_request(*args, **kwargs)
+
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
 
 def _error_response(status: int, error: str, message: str):
     """Create a standardized error response."""
@@ -47,6 +71,39 @@ def _success_response(message: str, data: dict = None):
     if data is not None:
         response["data"] = data
     return jsonify(response)
+
+
+def _user_service_error_response(result):
+    """Map user-service errors to HTTP status without leaking server details."""
+    if not isinstance(result, dict):
+        return None
+    status = result.get("code", result.get("status"))
+    if isinstance(status, int) and 400 <= status <= 599:
+        if status >= 500:
+            result = {
+                "status": status,
+                "error": "Internal Server Error",
+                "message": "An error occurred",
+            }
+        return result, status
+    return None
+
+
+def _active_account_required(method):
+    """Recheck persisted account state after Flask-JWT validates the token."""
+    @wraps(method)
+    def wrapped(*args, **kwargs):
+        try:
+            user = get_user_by_id_service(get_jwt_identity())
+        except Exception as exc:
+            logger.error("Account validation failed (%s)", type(exc).__name__)
+            return _user_service_error_response({"status": 500})
+        if user is None:
+            return _user_service_error_response({
+                "status": 401, "error": "Unauthorized", "message": "User not authenticated",
+            })
+        return method(*args, **kwargs)
+    return wrapped
 
 
 def _get_clerk_headers():
@@ -66,12 +123,17 @@ def _fetch_clerk_user(user_id: str):
     return response.json()
 
 
-def _build_user_args_from_clerk(user_id: str, clerk_data: dict, role: str = "user") -> dict:
+def _build_user_args_from_clerk(
+    user_id: str, clerk_data: dict, role: str = "user"
+) -> dict:
     """Build user arguments dictionary from Clerk API response."""
     email = clerk_data.get("email_addresses", [{}])[0].get("email_address")
     first_name = clerk_data.get("first_name")
     last_name = clerk_data.get("last_name")
-    
+    # Clerk authenticates through its signed tokens. A public Clerk identifier
+    # must never double as a local password; Admin may set a local one later.
+    local_password = secrets.token_urlsafe(48)
+
     return {
         "user_id": user_id,
         "first_name": first_name,
@@ -79,13 +141,20 @@ def _build_user_args_from_clerk(user_id: str, clerk_data: dict, role: str = "use
         "username": f"{first_name}_{last_name}",
         "email": email,
         "provider": "clerk",
-        "password": user_id,
-        "confirm_password": user_id,
+        "password": local_password,
+        "confirm_password": local_password,
         "role": role,
     }
 
 
-def _build_log_args(user_id: str, log_type: str, event: str, source: str, user_data: dict, extra: dict = None) -> dict:
+def _build_log_args(
+    user_id: str,
+    log_type: str,
+    event: str,
+    source: str,
+    user_data: dict,
+    extra: dict = None,
+) -> dict:
     """Build log arguments dictionary."""
     log_details = {
         "event": event,
@@ -94,7 +163,7 @@ def _build_log_args(user_id: str, log_type: str, event: str, source: str, user_d
     }
     if extra:
         log_details.update(extra)
-    
+
     return {
         "user_id": user_id,
         "log_type": log_type,
@@ -114,12 +183,13 @@ def _save_log_silent(log_args: dict):
 # Controllers
 # =============================================================================
 
-class user_controller(Resource):
+class user_controller(_RetirableResource):
     """
     Class to handle user login, update, and deletion.
     """
 
     @jwt_required()
+    @_active_account_required
     def get(self):
         """
         Handle GET request all users
@@ -139,17 +209,27 @@ class user_controller(Resource):
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _error_response(401, "Unauthorized", "User not authenticated")
+            return _user_service_error_response(
+                {
+                    "status": 401,
+                    "error": "Unauthorized",
+                    "message": "User not authenticated",
+                }
+            )
 
         try:
-            return jsonify(get_all_users_service(current_user))
+            result = get_all_users_service(current_user)
+            error = _user_service_error_response(result)
+            return error if error is not None else jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("User lookup failed (%s)", type(e).__name__)
+            return _user_service_error_response({"status": 500})
 
     def post(self):
         """
         Handle POST request for user login.
-        Expects 'username' and 'password' in the request body.
+        Requires username or email and password. Both identifiers, when supplied,
+        must match the same unique local account. Clerk JWT authentication is independent.
         ---
         tags:
             - Authentication
@@ -160,23 +240,37 @@ class user_controller(Resource):
                 description: Returns a JWT token if login is successful.
             400:
                 description: Invalid Parameters
+            401:
+                description: Invalid or ambiguous credentials
             500:
                 description: An Error Occurred
         """
         parser = reqparse.RequestParser()
-        parser.add_argument("username", required=True)
-        parser.add_argument("password", required=True)
-        args = parser.parse_args()
-
-        if not args.get("username") or not args.get("password"):
-            return _error_response(400, "Bad Request", "Username and password are required")
+        parser.add_argument("username", type=lambda value: value, required=False)
+        parser.add_argument("email", type=lambda value: value, required=False)
+        parser.add_argument("password", type=lambda value: value, required=False)
+        if request.is_json:
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                return _user_service_error_response({
+                    "status": 400, "error": "Bad Request", "message": "A JSON object is required",
+                })
+            # reqparse flattens JSON lists before type validation. Keep the raw
+            # values so the service can reject non-string credentials.
+            args = {key: payload.get(key) for key in ("username", "email", "password")}
+        else:
+            args = parser.parse_args()
 
         try:
-            return jsonify(login_user_service(args))
+            result = login_user_service(args)
+            error = _user_service_error_response(result)
+            return error if error is not None else jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("Local login request failed (%s)", type(e).__name__)
+            return _user_service_error_response({"status": 500})
 
     @jwt_required()
+    @_active_account_required
     def put(self):
         """
         Handle PUT request for user update.
@@ -203,7 +297,13 @@ class user_controller(Resource):
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _error_response(401, "Unauthorized", "User not authenticated")
+            return _user_service_error_response(
+                {
+                    "status": 401,
+                    "error": "Unauthorized",
+                    "message": "User not authenticated",
+                }
+            )
 
         parser = reqparse.RequestParser()
         parser.add_argument("username", required=True)
@@ -217,15 +317,21 @@ class user_controller(Resource):
         args = parser.parse_args()
 
         try:
-            return jsonify(update_user_service(args, current_user))
+            result = update_user_service(args, current_user)
+            error = _user_service_error_response(result)
+            return error if error is not None else jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("User update failed (%s)", type(e).__name__)
+            return _user_service_error_response({"status": 500})
 
     @jwt_required()
+    @_active_account_required
     def delete(self):
         """
-        Handle DELETE request for user deletion.
-        Expects 'user_id' in the request body.
+        Logically deactivate a user, preserving the row and audit history.
+        Requires an active Admin and 'user_id' in the request body. Repeating
+        the operation returns the same success shape without changing updated_at
+        or recording another transition. Existing tokens are refused on the next request.
         ---
         tags:
             - Authentication
@@ -235,37 +341,50 @@ class user_controller(Resource):
             - $ref: '#/parameters/UserDeletionParameters'
         responses:
             200:
-                description: Returns a success message if deletion is successful.
+                description: User deactivated or already inactive. The existing success payload is preserved.
             400:
                 description: Invalid Parameters
             401:
                 description: Unauthorized
             403:
                 description: Forbidden
+            404:
+                description: Target user does not exist.
             500:
                 description: An Error Occurred
         """
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _error_response(401, "Unauthorized", "User not authenticated")
+            return _user_service_error_response(
+                {
+                    "status": 401,
+                    "error": "Unauthorized",
+                    "message": "User not authenticated",
+                }
+            )
 
         parser = reqparse.RequestParser()
         parser.add_argument("user_id", required=True)
         args = parser.parse_args()
 
         try:
-            return jsonify(delete_user_service(args.user_id, current_user))
+            result = delete_user_service(args.user_id, current_user)
+            error = _user_service_error_response(result)
+            return error if error is not None else jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("User deletion failed (%s)", type(e).__name__)
+            return _user_service_error_response({"status": 500})
 
 
-class user_create_controller(Resource):
+class user_create_controller(_RetirableResource):
     @jwt_required()
+    @_active_account_required
     def post(self):
         """
-        Handle POST request for user creation.
-        Expects 'username', 'password', 'confirm_password', 'email', and 'role' in the request body.
+        Create a user on behalf of a persisted Admin.
+        The caller's stored role must be exactly Admin; JWT role claims do not grant access.
+        Supported roles are Admin, global, vl, dpi, tb_gx, tb_cl, ad and unassigned user. Clerk provisioning uses a separate signed webhook.
         ---
         tags:
             - Authentication
@@ -276,15 +395,25 @@ class user_create_controller(Resource):
                 description: Returns a success message if user is created successfully.
             400:
                 description: Invalid Parameters
+            401:
+                description: Missing or expired API JWT
             403:
-                description: Forbidden
+                description: Caller has no local account with the Admin role
+            422:
+                description: Malformed API JWT
             500:
                 description: An Error Occurred
         """
         current_user = get_jwt_identity()
 
         if not current_user:
-            return _error_response(401, "Unauthorized", "User not authenticated")
+            return _user_service_error_response(
+                {
+                    "status": 401,
+                    "error": "Unauthorized",
+                    "message": "User not authenticated",
+                }
+            )
 
         parser = reqparse.RequestParser()
         parser.add_argument("username", required=True)
@@ -297,9 +426,14 @@ class user_create_controller(Resource):
         args = parser.parse_args()
 
         try:
-            return jsonify(create_user_service(args, current_user))
+            result = create_user_service(args, current_user)
+            error = _user_service_error_response(result)
+            if error is not None:
+                return error
+            return jsonify(result)
         except Exception as e:
-            return _error_response(500, "Internal Server Error", str(e))
+            logger.error("User creation failed (%s)", type(e).__name__)
+            return _user_service_error_response({"status": 500})
 
 
 class clerk_user_controller(Resource):
@@ -363,7 +497,9 @@ class clerk_user_controller(Resource):
                 handler = getattr(self, handler_name)
                 return handler(data)
 
-            return _error_response(400, "Bad Request", f"Unknown event type: {event_type}")
+            return _error_response(
+                400, "Bad Request", f"Unknown event type: {event_type}"
+            )
 
         except Exception as e:
             return _error_response(500, "Internal Server Error", str(e))
@@ -375,7 +511,9 @@ class clerk_user_controller(Resource):
 
         clerk_data = _fetch_clerk_user(user_id)
         if not clerk_data:
-            return _error_response(400, "Bad Request", "Failed to fetch user from Clerk API")
+            return _error_response(
+                400, "Bad Request", "Failed to fetch user from Clerk API"
+            )
 
         args = _build_user_args_from_clerk(user_id, clerk_data)
         logout = logout_user_service(args)
@@ -388,7 +526,9 @@ class clerk_user_controller(Resource):
             "last_name": clerk_data.get("last_name"),
             "email": clerk_data.get("email_addresses", [{}])[0].get("email_address"),
         }
-        log_args = _build_log_args(user_id, log_type, event, "auth_controller.clerk_webhook", user_data)
+        log_args = _build_log_args(
+            user_id, log_type, event, "auth_controller.clerk_webhook", user_data
+        )
         _save_log_silent(log_args)
 
         return _success_response(logout.get("message"), logout.get("data"))
@@ -398,13 +538,18 @@ class clerk_user_controller(Resource):
         user_id = data.get("data", {}).get("user_id")
 
         if not user_id:
-            return _error_response(400, "Bad Request", "User ID not found in session data")
+            return _error_response(
+                400, "Bad Request", "User ID not found in session data"
+            )
 
         clerk_data = _fetch_clerk_user(user_id)
         if not clerk_data:
-            return _error_response(400, "Bad Request", "Failed to fetch user details from Clerk API")
+            return _error_response(
+                400, "Bad Request", "Failed to fetch user details from Clerk API"
+            )
 
-        existing_user = get_user_by_id_service(user_id)
+        # A deactivated row is a tombstone, not a missing Clerk account.
+        existing_user = get_user_by_id_service(user_id, include_inactive=True)
 
         if existing_user:
             return self._login_existing_user(existing_user, data)
@@ -413,7 +558,13 @@ class clerk_user_controller(Resource):
 
     def _login_existing_user(self, user, data: dict):
         """Record a Clerk login for an existing user (no token is issued)."""
-        update_last_login_service(user.user_id)
+        if not user.is_active:
+            return _user_service_error_response({
+                "status": 401, "error": "Unauthorized", "message": "Invalid credentials",
+            })
+        error = _user_service_error_response(update_last_login_service(user.user_id))
+        if error is not None:
+            return error
 
         user_data = {
             "user_id": user.user_id,
@@ -432,9 +583,12 @@ class clerk_user_controller(Resource):
             },
         }
         log_args = _build_log_args(
-            user.user_id, "login", "login",
+            user.user_id,
+            "login",
+            "login",
             "auth_controller.clerk_user_controller.session_created",
-            user_data, extra
+            user_data,
+            extra,
         )
         _save_log_silent(log_args)
 
@@ -451,9 +605,16 @@ class clerk_user_controller(Resource):
         )
 
     def _create_new_user_from_clerk(self, user_id: str, clerk_data: dict):
-        """Create a new user from Clerk data."""
+        """Provision a standard user after the webhook signature is verified."""
         args = _build_user_args_from_clerk(user_id, clerk_data)
-        user_create = create_user_service(args, user_id)
+        try:
+            user_create = provision_clerk_user_service(args)
+        except Exception as exc:
+            logger.error("Clerk user provisioning failed (%s)", type(exc).__name__)
+            return _user_service_error_response({"status": 500})
+        error = _user_service_error_response(user_create)
+        if error is not None:
+            return error
 
         user_data = {
             "user_id": user_id,
@@ -462,8 +623,11 @@ class clerk_user_controller(Resource):
             "email": clerk_data.get("email_addresses", [{}])[0].get("email_address"),
         }
         log_args = _build_log_args(
-            user_id, "user_created", "user_created",    
-            "auth_controller.clerk_webhook", user_data
+            user_id,
+            "user_created",
+            "user_created",
+            "auth_controller.clerk_webhook",
+            user_data,
         )
         _save_log_silent(log_args)
 
@@ -475,7 +639,9 @@ class clerk_user_controller(Resource):
 
         clerk_data = _fetch_clerk_user(user_id)
         if not clerk_data:
-            return _error_response(400, "Bad Request", "Failed to fetch user from Clerk API")
+            return _error_response(
+                400, "Bad Request", "Failed to fetch user from Clerk API"
+            )
 
         return self._create_new_user_from_clerk(user_id, clerk_data)
 
@@ -485,10 +651,19 @@ class clerk_user_controller(Resource):
 
         clerk_data = _fetch_clerk_user(user_id)
         if not clerk_data:
-            return _error_response(400, "Bad Request", "Failed to fetch user from Clerk API")
+            return _error_response(
+                400, "Bad Request", "Failed to fetch user from Clerk API"
+            )
 
         args = _build_user_args_from_clerk(user_id, clerk_data)
-        user_update = update_user_service(args, user_id)
+        try:
+            user_update = sync_clerk_user_service(args)
+        except Exception as exc:
+            logger.error("Clerk profile update failed (%s)", type(exc).__name__)
+            return _user_service_error_response({"status": 500})
+        error = _user_service_error_response(user_update)
+        if error is not None:
+            return error
 
         user_data = {
             "user_id": user_id,
@@ -497,24 +672,23 @@ class clerk_user_controller(Resource):
             "email": clerk_data.get("email_addresses", [{}])[0].get("email_address"),
         }
         log_args = _build_log_args(
-            user_id, "user_updated", "user_updated",
-            "auth_controller.clerk_webhook", user_data
+            user_id,
+            "user_updated",
+            "user_updated",
+            "auth_controller.clerk_webhook",
+            user_data,
         )
         _save_log_silent(log_args)
 
         return _success_response(user_update.get("message"), user_update.get("data"))
 
     def _handle_user_deleted(self, data: dict):
-        """Handle user.deleted event."""
+        """Deactivate after Svix verification; audit only the atomic transition."""
         user_id = data.get("data", {}).get("id")
 
         deleted = delete_user_service(user_id)
 
-        user_data = {"user_id": user_id}
-        log_args = _build_log_args(
-            user_id, "user_deleted", "user_deleted",
-            "auth_controller.clerk_webhook", user_data
-        )
-        _save_log_silent(log_args)
-
+        error = _user_service_error_response(deleted)
+        if error is not None:
+            return error
         return _success_response(deleted.get("message"), deleted.get("data"))

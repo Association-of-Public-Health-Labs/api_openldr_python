@@ -1,5 +1,7 @@
 import pytest
 import json
+from datetime import datetime
+from uuid import uuid4
 from unittest.mock import patch, MagicMock
 from flask import Flask
 from flask_restful import Api
@@ -43,14 +45,20 @@ def app():
     from hiv.vl.routes import vl_routes
     from hiv.eid.routes import eid_routes
     from tb.gxpert.routes import tb_gxpert_routes
+    from tb.cultura.routes import tb_cultura_routes
+    from dict.routes import dict_routes
     from auth.routes import authentication_routes
     from suggestions.routes import suggestion_routes
+    from usage.routes import usage_routes
 
     vl_routes(api)
     eid_routes(api)
     tb_gxpert_routes(api)
+    tb_cultura_routes(api)
+    dict_routes(api)
     authentication_routes(api)
     suggestion_routes(api)
+    usage_routes(api)
 
     with app.app_context():
         db.create_all()
@@ -65,11 +73,51 @@ def client(app):
 
 
 @pytest.fixture
-def auth_headers(app):
+def persisted_user(app):
+    """Factory for real users in the test SQLite bind, scoped to one test."""
+    from auth.user_model import User
+
+    created_ids = []
+
+    def create(role="Admin", user_id=None):
+        user_id = user_id or f"test-role-{uuid4()}"
+        with app.app_context():
+            existing = User.query.filter_by(user_id=user_id).first()
+            if existing is not None:
+                return user_id
+            now = datetime.now()
+            db.session.add(User(
+                user_id=user_id,
+                user_name="testuser",
+                first_name="Test",
+                last_name="User",
+                email="test@openldr.org",
+                password="unused-test-password-hash",
+                role=role,
+                start_date=now,
+                updated_at=now,
+            ))
+            db.session.commit()
+            created_ids.append(user_id)
+        return user_id
+
+    yield create
+
+    with app.app_context():
+        db.session.rollback()
+        if created_ids:
+            User.query.filter(User.user_id.in_(created_ids)).delete(synchronize_session=False)
+            db.session.commit()
+        db.session.remove()
+
+
+@pytest.fixture
+def auth_headers(app, persisted_user):
     """Valid JWT authorization headers."""
+    user_id = persisted_user(user_id="test-123")
     with app.app_context():
         token = create_access_token(
-            identity="test-user",
+            identity=user_id,
             additional_claims={
                 "user_id": "test-123",
                 "user_name": "testuser",

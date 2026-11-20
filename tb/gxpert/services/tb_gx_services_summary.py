@@ -2,6 +2,7 @@ from tb.gxpert.models.tb_gx_model import TBMaster
 from utilities.utils import *
 from sqlalchemy import and_, func, case, text
 from auth.auth_service import get_user_by_id_service
+from utilities.permissions import patient_access_role
 
 
 def dashboard_header_component_summary_service(req_args):
@@ -30,7 +31,7 @@ def dashboard_header_component_summary_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     try:
         query = TBMaster.query.with_entities(
@@ -248,7 +249,7 @@ def dashboard_summary_positivity_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Remove any empty or whitespace-only entries from facilities
     facilities = [f.strip() for f in facilities if f.strip()]
@@ -395,7 +396,7 @@ def dashboard_summary_positivity_by_lab_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "laboratories"
@@ -538,7 +539,7 @@ def dashboard_summary_positivity_by_lab_by_age_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Remove any empty or whitespace-only entries from facilities
     facilities = [f.strip() for f in facilities if f.strip()]
@@ -709,7 +710,7 @@ def dashboard_summary_sample_types_by_month_by_age_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Remove any empty or whitespace-only entries from facilities
     facilities = [f.strip() for f in facilities if f.strip()]
@@ -911,7 +912,7 @@ def dashboard_summary_sample_types_by_facility_by_age_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(disaggregation, facility_type, TBMaster, "facilities")
 

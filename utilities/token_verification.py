@@ -205,6 +205,9 @@ def _verify_api_token(token):
         )
         raise TokenVerificationError("API token secret is weak or unset")
     try:
-        return decode_token(token)
+        claims = decode_token(token)
     except Exception as exc:
         raise TokenVerificationError(f"invalid API token: {exc}") from exc
+    if claims.get("type") != "access":
+        raise TokenVerificationError("API access token required")
+    return claims

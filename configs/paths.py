@@ -2,6 +2,8 @@ import os
 import platform
 import configparser
 from pathlib import Path
+
+import pyodbc
 from sqlalchemy.engine import URL
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -9,25 +11,23 @@ IS_WINDOWS = platform.system() == "Windows"
 # -----------------------------
 # Load configuration
 # -----------------------------
-config = None
-
-if IS_WINDOWS:
-    config = configparser.ConfigParser()
-    config.read(Path(__file__).parent / "configs.ini")
+# Values are literal: credentials may contain '%' and are never interpolated.
+config = configparser.ConfigParser(interpolation=None)
+config.read(Path(__file__).parent / "configs.ini")
 
 
 def get_config(section, key, env_key=None, default=None, *, raw=False):
     """
     Unified configuration getter.
 
-    Windows  -> configs.ini
-    Linux    -> environment variables
+    Environment variables take precedence on every platform, including an
+    explicitly empty value. configs.ini supplies values that are not in env.
     """
 
-    if IS_WINDOWS:
-        return config.get(section, key, fallback=default, raw=raw)
-    else:
-        return os.environ.get(env_key or key.upper(), default)
+    environment_key = env_key or key.upper()
+    if environment_key in os.environ:
+        return os.environ[environment_key]
+    return config.get(section, key, fallback=default, raw=raw)
 
 
 # -----------------------------
@@ -99,6 +99,13 @@ CLERK_AUTHORIZED_PARTIES = get_config(
 
 
 # -----------------------------
+# API service accounts
+# -----------------------------
+# Comma-separated user_name values allowed to POST /auth/login when PERMISSIONS_ENFORCED is on.
+API_SERVICE_ACCOUNTS = get_config("Auth", "api_service_accounts", "API_SERVICE_ACCOUNTS")
+
+
+# -----------------------------
 # Email / SMTP (shared doubts and suggestions)
 # -----------------------------
 SMTP_HOST = get_config("Email", "host", "SMTP_HOST", raw=True)
@@ -117,24 +124,41 @@ SMTP_TIMEOUT = get_config("Email", "timeout", "SMTP_TIMEOUT", "15", raw=True)
 # -----------------------------
 SQL_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
 SQL_ODBC_POOLING = os.getenv("SQL_ODBC_POOLING", "true").strip().lower()
+# pyodbc pooling is process-wide and must be configured before any connection.
+pyodbc.pooling = SQL_ODBC_POOLING not in {"0", "false", "no", "off"}
+
+
+def _missing(value):
+    return value is None or not str(value).strip()
+
+
+def _odbc_value(value):
+    value = str(value)
+    if any(character in value for character in ";{}") or value != value.strip():
+        return "{" + value.replace("}", "}}") + "}"
+    return value
 
 
 def build_odbc_connection_string(user, pwd, host, db):
+    missing = [
+        name
+        for name, value in {"user": user, "pwd": pwd, "host": host, "db": db}.items()
+        if _missing(value)
+    ]
+    if missing:
+        raise ValueError("Missing SQL connection settings: " + ", ".join(missing))
+
     options = [
         f"DRIVER={{{SQL_ODBC_DRIVER}}}",
-        f"SERVER={host}",
-        f"DATABASE={db}",
-        f"UID={user}",
-        f"PWD={pwd}",
+        f"SERVER={_odbc_value(host)}",
+        f"DATABASE={_odbc_value(db)}",
+        f"UID={_odbc_value(user)}",
+        f"PWD={_odbc_value(pwd)}",
         "Encrypt=yes",
         "TrustServerCertificate=yes",
-        "Connection Timeout=30",
         "MARS_Connection=No",
         "APP=OpenLDR API",
     ]
-
-    if SQL_ODBC_POOLING in {"0", "false", "no", "off"}:
-        options.append("Pooling=No")
 
     return ";".join(options) + ";"
 
@@ -143,10 +167,10 @@ SQL_CONNECTION_OPTIONS = {
     "driver": SQL_ODBC_DRIVER,
     "Encrypt": "yes",
     "TrustServerCertificate": "yes",
-    "Connection Timeout": "30",
     "MARS_Connection": "No",
     "APP": "OpenLDR API",
-    "Pooling": "No" if SQL_ODBC_POOLING in {"0", "false", "no", "off"} else "Default",
+    # Diagnostic metadata only; pooling is set through pyodbc, not ODBC attrs.
+    "Pooling": "Default" if pyodbc.pooling else "No",
 }
 
 
@@ -165,49 +189,89 @@ def make_url(user, pwd, host, db):
 # -----------------------------
 # SQLAlchemy Binds
 # -----------------------------
-SQLALCHEMY_BINDS_APHL_OPENLDR_ORG_MZ = {
-    # "vlSMS": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, VIRALLOADSMS_DATABASE),
-    "vl": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, VIRALLOADDATA_DATABASE),
-    "dpi": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, DPI_DATABASE_DATABASE),
-    "ad": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, HIVAD_DATABASE),
-    "tb": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, TBDATA_DATABASE_DATABASE),
-    "dict": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, DICT_DATABASE_DATABASE),
-    "users": make_url(USERNAME, PASSWORD, LOCAL_DOMAIN_NAME, USER_DATABASE),
-    "reportData": make_url(
-        REPORT_DATA_USER,
-        REPORT_DATA_PASSWORD,
-        REPORT_DATA_HOST or LOCAL_DOMAIN_NAME,
-        REPORT_DATA_DATABASE,
-    ),
+_DOMAIN_SETTINGS = {
+    "local": (LOCAL_DOMAIN_NAME, "LOCAL_DOMAIN ([Domains] local)"),
+    "cdr": (CDR_DOMAIN_NAME, "CDR_DOMAIN ([Domains] cdr)"),
+    "cloud": (CLOUD_DOMAIN_NAME, "CLOUD_DOMAIN ([Domains] cloud)"),
 }
 
-SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ = {
-    # "vlSMS": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, VIRALLOADSMS_DATABASE or VIRALLOADDATA_DATABASE),
-    "vl": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, VIRALLOADDATA_DATABASE),
-    "dpi": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, DPI_DATABASE_DATABASE),
-    "ad": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, HIVAD_DATABASE),
-    "tb": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, TBDATA_DATABASE_DATABASE),
-    "dict": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, DICT_DATABASE_DATABASE),
-    "users": make_url(USERNAME, PASSWORD, CDR_DOMAIN_NAME, USER_DATABASE),
-    "reportData": make_url(
-        REPORT_DATA_USER,
-        REPORT_DATA_PASSWORD,
-        REPORT_DATA_HOST or CDR_DOMAIN_NAME,
-        REPORT_DATA_DATABASE,
-    ),
+_DATABASE_SETTINGS = {
+    "vl": (VIRALLOADDATA_DATABASE, "DB_VL_DATA ([Databases] ViralLoadData)"),
+    "dpi": (DPI_DATABASE_DATABASE, "DB_DPI ([Databases] Dpi)"),
+    "ad": (HIVAD_DATABASE, "DB_HIV_AD ([Databases] HivAdvancedDisease)"),
+    "tb": (TBDATA_DATABASE_DATABASE, "DB_TB_DATA ([Databases] TBData)"),
+    "dict": (DICT_DATABASE_DATABASE, "DB_DICT ([Databases] Dictionary)"),
+    "users": (USER_DATABASE, "DB_USERS ([Databases] Users)"),
+    "reportData": (REPORT_DATA_DATABASE, "DB_REPORT_DATA ([Databases] ReportData)"),
 }
 
-SQLALCHEMY_BINDS_CLOUD_QUEUE_OPENLDR_ORG_MZ = {
-    "vl": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, VIRALLOADDATA_DATABASE),
-    "dpi": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, DPI_DATABASE_DATABASE),
-    "ad": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, HIVAD_DATABASE),
-    "tb": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, TBDATA_DATABASE_DATABASE),
-    "dict": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, DICT_DATABASE_DATABASE),
-    "users": make_url(USERNAME, PASSWORD, CLOUD_DOMAIN_NAME, USER_DATABASE),
-    "reportData": make_url(
-        REPORT_DATA_USER,
-        REPORT_DATA_PASSWORD,
-        REPORT_DATA_HOST or CLOUD_DOMAIN_NAME,
-        REPORT_DATA_DATABASE,
-    ),
-}
+
+def _bind_settings(domain, bind_key):
+    host = _DOMAIN_SETTINGS[domain]
+    user = (USERNAME, "DB_USER ([Databases] database_user)")
+    password = (PASSWORD, "DB_PASSWORD ([Databases] database_password)")
+    if bind_key == "reportData":
+        if REPORT_DATA_HOST:
+            host = (REPORT_DATA_HOST, "REPORT_DATA_HOST ([Databases] report_data_host)")
+        user = (
+            REPORT_DATA_USER,
+            "REPORT_DATA_USER / DB_USER ([Databases] report_data_user / database_user)",
+        )
+        password = (
+            REPORT_DATA_PASSWORD,
+            "REPORT_DATA_PASSWORD / DB_PASSWORD ([Databases] report_data_password / database_password)",
+        )
+    return {
+        "user": user,
+        "pwd": password,
+        "host": host,
+        "db": _DATABASE_SETTINGS[bind_key],
+    }
+
+
+def get_sqlalchemy_binds(domain, bind_keys=None):
+    """Validate and build only the requested environment and database binds.
+
+    Errors identify configuration names, never their values. Merely importing
+    this module does not require every environment/database to be configured.
+    """
+    if domain not in _DOMAIN_SETTINGS:
+        raise ValueError("SQL environment must be one of: local, cdr, cloud")
+    keys = list(_DATABASE_SETTINGS) if bind_keys is None else list(bind_keys)
+    if any(key not in _DATABASE_SETTINGS for key in keys):
+        raise ValueError("Unknown SQL bind; expected: " + ", ".join(_DATABASE_SETTINGS))
+
+    settings = {key: _bind_settings(domain, key) for key in keys}
+    missing = list(
+        dict.fromkeys(
+            name
+            for fields in settings.values()
+            for value, name in fields.values()
+            if _missing(value)
+        )
+    )
+    if missing:
+        raise ValueError(
+            "Missing SQL configuration. Set environment variables or configs.ini: "
+            + "; ".join(missing)
+        )
+    return {
+        key: make_url(**{field: value for field, (value, _) in fields.items()})
+        for key, fields in settings.items()
+    }
+
+
+def _configured_binds(domain):
+    # Compatibility for existing imports: keep valid binds without making
+    # unrelated or incomplete environments prevent configuration/tool imports.
+    keys = [
+        key
+        for key in _DATABASE_SETTINGS
+        if all(not _missing(value) for value, _ in _bind_settings(domain, key).values())
+    ]
+    return get_sqlalchemy_binds(domain, keys)
+
+
+SQLALCHEMY_BINDS_APHL_OPENLDR_ORG_MZ = _configured_binds("local")
+SQLALCHEMY_BINDS_CDR_OPENLDR_ORG_MZ = _configured_binds("cdr")
+SQLALCHEMY_BINDS_CLOUD_QUEUE_OPENLDR_ORG_MZ = _configured_binds("cloud")

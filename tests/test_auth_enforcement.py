@@ -108,7 +108,8 @@ def clerk_config(monkeypatch):
 
 
 @pytest.mark.parametrize("url,service,result", CLERK_ENDPOINTS)
-def test_valid_clerk_token_is_accepted(client, clerk_config, url, service, result):
+def test_valid_clerk_token_is_accepted(client, clerk_config, persisted_user, url, service, result):
+    persisted_user(role="Admin", user_id="user_clerk_42")
     token = make_clerk_token(sub="user_clerk_42")
     with patch(service, return_value=result) as service_mock:
         response = client.get(url, headers={"Authorization": f"Bearer {token}"})

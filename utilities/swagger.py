@@ -1,10 +1,35 @@
 # utilities/swagger.py
+from auth.roles import CANONICAL_ROLES
+from utilities.api_version import API_VERSION
+
 swagger_template = {
     "swagger": "2.0",
     "info": {
         "title": "OpenLDR Analytics API",
-        "description": "This is an API for managing OPENLDR Analytics Reports.",
-        "version": "1.0.0",
+        "description": (
+            "OpenLDR epidemiological and laboratory reporting API."
+            f"\n\n## What's new in {API_VERSION}\n\n"
+            "- Dashboard access uses persisted roles: vl, dpi, tb_gx, tb_cl and ad. "
+            "The global role reads all report subdivisions; Admin manages users "
+            "and retains privileged patient access. Shared dictionaries require "
+            "an assigned dashboard role. See docs/access-control.md.\n"
+            "- Local login uses username or email and a bcrypt-verified password. "
+            "Clerk token authentication remains supported.\n"
+            "- User removal now deactivates the account, preserving its row and "
+            "audit history. Repeated removal preserves the first timestamp. "
+            "Inactive accounts cannot log in; previously issued API and Clerk "
+            "JWTs are refused on the next protected request after deactivation "
+            "is committed. See docs/user-deactivation.md.\n"
+            "- Reporting and dictionary errors use real HTTP status codes. "
+            "5xx bodies contain only status, code and the generic message "
+            "'An error occurred'. Failed reports are never served as HTTP 200 "
+            "cache hits. See docs/reporting-errors-and-cache.md.\n"
+            "- Reporting diagnostics use route patterns, HTTP codes and exception "
+            "classes without patient details, query values or tracebacks. "
+            "See docs/patient-log-privacy.md.\n\n"
+            "See CHANGELOG.md for release compatibility and deployment requirements."
+        ),
+        "version": API_VERSION,
     },
     "securityDefinitions": {
         "Bearer": {
@@ -15,8 +40,8 @@ swagger_template = {
         }
     },
     "security": [{"Bearer": []}],
-    # "host": "dev.openldr.org.mz",  # Uncomment this line to use the development server
-    "host": "api.openldr.org.mz",  # Uncomment this line to use the production server
+    "host": "dev.openldr.org.mz",  # Uncomment this line to use the development server
+    # "host": "api.openldr.org.mz",  # Uncomment this line to use the production server
     # "host": "6cb88dcff631.ngrok-free.app",  # Uncomment this line to use ngrok
     # "host": "localhost:5000",  # Uncomment this line to use the local server
     "basePath": "/",
@@ -141,21 +166,21 @@ swagger_template = {
             "in": "body",
             "schema": {"$ref": "#/definitions/user_update"},
             "required": True,
-            "description": "Data for updating a user account. Must be sent over HTTPS.",
+            "description": "Requires a persisted Admin. Set a supported dashboard role; omit password and confirm_password together to retain the current password. Must be sent over HTTPS.",
         },
         "UserDeletionParameters": {
             "name": "delete",
             "in": "body",
             "schema": {"$ref": "#/definitions/user_deletion"},
             "required": True,
-            "description": "The ID of the user to delete.",
+            "description": "The user_id of the account to deactivate (active Admin only). Preserves the account and audit history; repeated removal does not change the first deactivation timestamp.",
         },
         "UserCreateParameters": {
             "name": "create",
             "in": "body",
             "schema": {"$ref": "#/definitions/user_create"},
             "required": True,
-            "description": "Data for creating a new user account. Must be sent over HTTPS.",
+            "description": "Requires a persisted Admin. Supported roles are Admin, global, vl, dpi, tb_gx, tb_cl, ad and unassigned user. Input is normalised case-insensitively. Must be sent over HTTPS.",
         },
         "ProvinceParameter": {
             "name": "province",
@@ -657,22 +682,29 @@ swagger_template = {
         },
         "user_login": {
             "type": "object",
-            "required": ["username", "password"],
+            "required": ["password"],
+            "description": "Provide username or email and the local password. When both identifiers are supplied they must match the same unique account. Ambiguous identifiers return HTTP 401. Clerk token authentication is independent.",
             "properties": {
                 "username": {
                     "type": "string",
                     "minLength": 3,
                     "maxLength": 50,
                     "example": "johndoe",
-                    "description": "The username of the user logging in.",
+                    "description": "Local username. Required when email is omitted.",
+                },
+                "email": {
+                    "type": "string",
+                    "format": "email",
+                    "example": "johndoe@example.com",
+                    "description": "Local email. Required when username is omitted; when used alone, must identify a unique account.",
                 },
                 "password": {
                     "type": "string",
-                    "minLength": 6,
-                    "maxLength": 100,
+                    "minLength": 1,
+                    "maxLength": 72,
                     "format": "password",
                     "example": "password123",
-                    "description": "The password of the user logging in. Must be sent over HTTPS.",
+                    "description": "Existing local password, at most 72 UTF-8 bytes. The public user_id is not a password. Must be sent over HTTPS.",
                 },
             },
         },
@@ -719,9 +751,9 @@ swagger_template = {
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["admin", "user"],
+                    "enum": list(CANONICAL_ROLES),
                     "example": "user",
-                    "description": "The role of the user (admin or user).",
+                    "description": "Role to assign: Admin, global, vl, dpi, tb_gx, tb_cl, ad or unassigned user. Normalised case-insensitively.",
                 },
                 "email": {
                     "type": "string",
@@ -770,7 +802,7 @@ swagger_template = {
                     "maxLength": 100,
                     "format": "password",
                     "example": "newpassword123",
-                    "description": "The new password of the user. Optional. Must be sent over HTTPS.",
+                    "description": "The new password of the user. Required. Must be sent over HTTPS.",
                 },
                 "confirm_password": {
                     "type": "string",
@@ -778,13 +810,13 @@ swagger_template = {
                     "maxLength": 100,
                     "format": "password",
                     "example": "newpassword123",
-                    "description": "The confirmation of the new password. Optional. Must match the password field if provided.",
+                    "description": "The required password confirmation. Must match the password field.",
                 },
                 "role": {
                     "type": "string",
-                    "enum": ["admin", "user"],
+                    "enum": list(CANONICAL_ROLES),
                     "example": "user",
-                    "description": "The role of the user (admin or user).",
+                    "description": "New dashboard role, normalised case-insensitively. Only a persisted Admin may assign it; user has no reporting scope.",
                 },
                 "email": {
                     "type": "string",
@@ -811,13 +843,14 @@ swagger_template = {
         "user_deletion": {
             "type": "object",
             "required": ["user_id"],
+            "description": "Active Admin only. Logically deactivate the account, preserving its row and audit history. Repeated requests keep the first updated_at and do not add another transition audit. Existing JWTs are refused on the next protected request.",
             "properties": {
                 "user_id": {
                     "type": "string",
                     "minLength": 6,
-                    "maxLength": 100,
+                    "maxLength": 50,
                     "example": "1234567890",
-                    "description": "The ID of the user to delete.",
+                    "description": "The user_id (NVARCHAR(50)) of the account to deactivate.",
                 },
             },
         },

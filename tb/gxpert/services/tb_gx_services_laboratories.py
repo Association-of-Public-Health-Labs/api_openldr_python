@@ -2,6 +2,7 @@ from tb.gxpert.models.tb_gx_model import TBMaster
 from utilities.utils import *
 from sqlalchemy import and_, or_, func, case
 from auth.auth_service import get_user_by_id_service
+from utilities.permissions import patient_access_role
 
 
 def GET_COLUMNS(disaggregation, facility_type, Model, flag):
@@ -47,7 +48,7 @@ def registered_samples_by_lab_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMNS(
         disaggregation, facility_type, TBMaster, "laboratories")
@@ -176,7 +177,7 @@ def registered_samples_by_lab_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -369,7 +370,7 @@ def tested_samples_by_lab_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Remove any empty or whitespace-only entries from facilities
     facilities = [f.strip()
@@ -542,7 +543,7 @@ def tested_samples_by_lab_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -726,7 +727,7 @@ def tested_samples_by_sample_types_by_laboratory_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Retrieve the column names based on the disaggregation and facility type
     ColumnNames = GET_COLUMN_NAME(
@@ -900,7 +901,7 @@ def tested_samples_by_samples_types_by_laboratory_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -1051,7 +1052,6 @@ def tested_samples_by_samples_types_by_laboratory_by_month_service(req_args):
         )
 
         # Print the query
-        print(query)
 
         data = query.all()
 
@@ -1135,7 +1135,7 @@ def rejected_samples_by_lab_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Retrieve the column names based on the disaggregation and facility type
     ColumnNames = GET_COLUMNS(
@@ -1271,7 +1271,7 @@ def rejected_samples_by_lab_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -1459,7 +1459,7 @@ def rejected_samples_by_lab_by_reason_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     # Retrieve the column names based on the disaggregation and facility type
     ColumnNames = GET_COLUMNS(
@@ -1635,7 +1635,7 @@ def rejected_samples_by_lab_by_reason_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -1871,7 +1871,7 @@ def tested_samples_by_lab_by_drug_type_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "laboratories"
@@ -2055,7 +2055,7 @@ def tested_samples_by_lab_by_drug_type_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -2298,7 +2298,7 @@ def trl_samples_by_lab_by_days_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "laboratories"
@@ -2477,7 +2477,7 @@ def trl_samples_by_lab_by_days_by_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month") if req_args.get("month") != "" else None
     year = req_args.get("year") if req_args.get("year") != "" else None
@@ -2725,7 +2725,7 @@ def trl_samples_avg_by_lab_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     ColumnNames = GET_COLUMN_NAME(
         disaggregation, facility_type, TBMaster, "laboratories")
@@ -2802,7 +2802,6 @@ def trl_samples_avg_by_lab_service(req_args):
             .order_by(ColumnNames)
         )
 
-        print(query.statement.compile(compile_kwargs={"literal_binds": True}))
 
         data = query.all()
 
@@ -2859,7 +2858,7 @@ def trl_samples_avg_by_lab_month_service(req_args):
             "error": str(e),
         }
 
-    user_role = user.role if user else "Unknown"
+    user_role = patient_access_role(user)
 
     month = req_args.get("month")
     year = req_args.get("year")
@@ -2961,8 +2960,6 @@ def trl_samples_avg_by_lab_month_service(req_args):
 
             data = query.all()
 
-            print(query.statement.compile(
-                compile_kwargs={"literal_binds": True}))
 
             response = process_patients(
                 data, dates, facility_type, gx_result_type, "tb", month, year
